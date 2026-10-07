@@ -235,3 +235,30 @@ main>*,aside>*{min-width:0}
 .anform input { width: 6em; }
 .anchart { width: 100%; height: auto; max-height: 260px; }
 .anchart text { font-size: 11px; fill: var(--dim); }
+
+/* ---- v2: focus rings, error badge, keyboard help, skeleton states, laptop widths */
+:root{--dim:#9aa6b3}
+h2 small{color:#7a8795}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button,select,input{font-family:inherit}
+.errbadge{cursor:pointer;background:transparent}
+.kbbtn{cursor:pointer;background:transparent;font:inherit;font-size:12px}
+.kbbtn:hover{color:var(--fg);border-color:var(--dim)}
+.kbhelp{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6)}
+.kbhelp[hidden]{display:none}
+.kbhelp>div{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 22px;min-width:280px}
+.kbhelp p{margin:6px 0}
+kbd{background:#1b2633;border:1px solid #3a4d63;border-bottom-width:2px;border-radius:4px;padding:0 6px;font:12px/1.4 ui-monospace,Consolas,monospace}
+.panel.flash{animation:flash .9s ease-out}
+@keyframes flash{from{box-shadow:0 0 0 2px var(--accent)}to{box-shadow:0 0 0 0 transparent}}
+.panel{scroll-margin-top:calc(var(--hh,60px) + 8px)}
+.empty:only-child{padding:10px 2px}
+#tower thead th{position:sticky;top:0;background:var(--panel);z-index:1}
+tr.car td{transition:background .15s}
+.tower{max-height:calc(100vh - var(--hh,60px) - 90px);overflow:auto}
+@media(min-width:700px) and (max-width:1280px){
+  main{grid-template-columns:minmax(0,1.25fr) minmax(340px,1fr)}
+  td,th{padding:3px 4px}
+  header{gap:8px 12px;padding:8px 12px}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
