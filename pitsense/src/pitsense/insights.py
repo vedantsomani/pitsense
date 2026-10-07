@@ -112,6 +112,27 @@ def compare(state, a: str, b: str) -> dict:
     return {"a": a, "b": b, "tla": tla, "laps": laps, "lap_time": times, "gap_s": gap, "stints": stints}
 
 
+def lap_kind(r) -> str:
+    """Why a lap time is not pace: '' (a normal lap), 'in', 'out', 'sc' (safety car, VSC or red flag), 'yellow'."""
+    if r.is_in_lap:
+        return "in"
+    if r.is_out_lap:
+        return "out"
+    ts = set(r.track_status.split(","))
+    return "sc" if ts & {"4", "5", "6", "7"} else "yellow" if "2" in ts else ""
+
+
+def lap_times(state, cars: list[str]) -> dict:
+    """Every lap time of ``cars`` with its kind (``lap_kind``) and tyre, so a chart can mark the laps that are not pace."""
+    out = {}
+    for c in cars:
+        rs = sorted((r for r in state.laps if r.driver == c and r.lap_time is not None), key=lambda r: r.lap)
+        out[c] = {"tla": state.drivers[c].tla if c in state.drivers else c, "laps": [r.lap for r in rs],
+                  "time_s": [round(float(r.lap_time), 3) for r in rs], "kind": [lap_kind(r) for r in rs],
+                  "compound": [r.compound for r in rs]}
+    return {"cars": out}
+
+
 # ----------------------------------------------------------------------------- speed trace
 def lap_samples(state, car: str, lap: int) -> dict | None:
     """CarData of one lap on a distance axis (m), from the published samples: time aligned through Position.

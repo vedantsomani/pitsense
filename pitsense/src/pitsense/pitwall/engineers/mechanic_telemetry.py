@@ -66,6 +66,15 @@ class Series:
         self.v = np.empty(cap)
         self.n = 0
 
+    # copies (race checkpoints) keep only the filled part of the fixed-size buffers; a restore re-expands them
+    def __getstate__(self) -> dict:
+        return {"cap": self.cap, "n": self.n, "t": self.t[:self.n].copy(), "v": self.v[:self.n].copy()}
+
+    def __setstate__(self, st: dict) -> None:
+        self.cap, self.n = st["cap"], st["n"]
+        self.t, self.v = np.empty(self.cap), np.empty(self.cap)
+        self.t[:self.n], self.v[:self.n] = st["t"], st["v"]
+
     def add(self, t: np.ndarray, v: np.ndarray) -> None:
         k = len(t)
         if k == 0:
@@ -107,6 +116,19 @@ class Ref:
         self.buf: dict = {}
         self.n: dict = {}
         self.cache: dict = {}
+
+    def __getstate__(self) -> dict:  # as for Series: copies keep only the filled slots
+        st = dict(self.__dict__)
+        st["buf"] = {k: b[:min(self.n[k], self.cap)].copy() for k, b in self.buf.items()}
+        return st
+
+    def __setstate__(self, st: dict) -> None:
+        self.__dict__.update(st)
+        full = {}
+        for k, b in st["buf"].items():
+            full[k] = np.empty(self.cap)
+            full[k][:len(b)] = b
+        self.buf = full
 
     def add(self, key, values: np.ndarray) -> None:
         if len(values) == 0:

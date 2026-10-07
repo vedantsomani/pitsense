@@ -154,6 +154,8 @@ class PitWallRuntime:
         self.thread: threading.Thread | None = None
         self.lock = threading.Lock()
         self.sim_lock = threading.RLock()  # the loop applies an event under it; questions copy the state under it
+        self._seek: dict | None = None  # a jump in progress: {target, from_lap, lap}; read by replay_status
+        self._seek_cancel = threading.Event()
         self._ask_gate = threading.Lock()  # one question (simulation) at a time; held outside sim_lock
         self._frozen: _Frozen | None = None
         self._gen = 0  # bumped by every jump
@@ -428,6 +430,7 @@ class PitWallRuntime:
             ctl.result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         finally:
             self._silent = self._is_indexer
+            self._seek = None
             ctl.done.set()
 
     def _seek_exec(self, lap: int) -> dict:
@@ -440,6 +443,9 @@ class PitWallRuntime:
         t0 = time.perf_counter()
         src, ix = self.source, self.replay_index
         lap = max(0, lap)
+        self._seek_cancel.clear()
+        seek = self._seek = {"target": lap, "from_lap": self.state.current_lap, "lap": self.state.current_lap}
+        via, replayed = "checkpoint", 0
         with self.sim_lock:
             self._gen += 1  # radio messages on their way and the last question's copy belong to the old place
             self._frozen = None
@@ -449,7 +455,6 @@ class PitWallRuntime:
                 self._ensure_wall()
             evs = src.log.events
             ck = ix.first_at_or_after(lap)
-            via, replayed = "checkpoint", 0
             if ck is not None:
                 _replay.restore(self, ck.payload)
             else:
@@ -462,10 +467,15 @@ class PitWallRuntime:
                     _replay.restore(self, start.payload)
                 via = "replay"
                 self._silent = True
-                while self.state.current_lap < lap and self.n_events < len(evs):
-                    self.handle(evs[self.n_events])
-                    replayed += 1
-                self._silent = self._is_indexer
+        if via == "replay":
+            # played forward with the lock taken per event: viewers keep getting the last snapshot, the dashboard
+            # sees the progress (status ``seek.lap``) and can cancel (``replay_cancel``)
+            while self.state.current_lap < lap and self.n_events < len(evs) and not self._seek_cancel.is_set():
+                self.handle(evs[self.n_events])
+                replayed += 1
+                seek["lap"] = self.state.current_lap
+            self._silent = self._is_indexer
+        with self.sim_lock:
             src.jump(self.n_events)
             self._prev_lap = self.state.current_lap
             self.last_event_wall = time.time()
@@ -478,6 +488,8 @@ class PitWallRuntime:
             res = {"ok": True, "requested": lap, "lap": self.state.current_lap, "t": round(self.state.t, 1),
                    "events": self.n_events, "via": via, "events_replayed": replayed,
                    "clamped": self.state.current_lap < lap, "ms": round((time.perf_counter() - t0) * 1000)}
+            if self._seek_cancel.is_set():
+                res["cancelled"] = True
         self._notify({"event": "status", "status": self.status, "seek": res})
         return res
 
@@ -530,8 +542,9 @@ class PitWallRuntime:
         self.source.set_speed(v)
         return {"ok": True, **self.replay_status()}
 
-    def replay_seek(self, lap=None, mark: str | None = None, timeout: float = 600.0) -> dict:
-        """Jump to a lap (or to the lap of a bookmark). Blocks until the jump is done; returns timing."""
+    def replay_seek(self, lap=None, mark: str | None = None, timeout: float = 600.0, wait: bool = True) -> dict:
+        """Jump to a lap (or to the lap of a bookmark). Blocks until the jump is done and returns the timing; with
+        ``wait=False`` it returns at once (``started``) and ``replay_status()["seek"]`` shows the progress."""
         err = self._replay_ok()
         if err:
             return {"ok": False, "error": err}
@@ -546,8 +559,15 @@ class PitWallRuntime:
             return {"ok": False, "error": "give {lap: N} or {mark: id}"}
         if lap < 0 or lap > 1000:
             return {"ok": False, "error": "lap out of range"}
+        if self._seek is not None:
+            return {"ok": False, "error": "a jump is already running"}
         ctl = _replay.Control("seek", lap=lap)
-        if self.thread is not None and self.thread.is_alive():
+        alive = self.thread is not None and self.thread.is_alive()
+        self._seek = {"target": lap, "from_lap": self.state.current_lap, "lap": self.state.current_lap}
+        if alive and not wait:
+            self.source.request(ctl)
+            return {"ok": True, "started": True, "target": lap}
+        if alive:
             self.source.request(ctl)
             end = time.monotonic() + timeout
             while not ctl.done.wait(0.05):
@@ -565,6 +585,16 @@ class PitWallRuntime:
                 self.start()  # a finished replay plays on from the new place
         return ctl.result or {"ok": False, "error": "jump failed"}
 
+    def replay_cancel(self) -> dict:
+        """Stop a jump in progress where it has got to (the race stays consistent at that event)."""
+        err = self._replay_ok()
+        if err:
+            return {"ok": False, "error": err}
+        if self._seek is None:
+            return {"ok": False, "error": "no jump is running"}
+        self._seek_cancel.set()
+        return {"ok": True}
+
     def replay_status(self) -> dict:
         src, ix = self.source, self.replay_index
         if not getattr(src, "seekable", False) or ix is None:
@@ -573,7 +603,7 @@ class PitWallRuntime:
                 "lap": self.state.current_lap, "total_laps": self.state.total_laps, "t": round(self.state.t, 1),
                 "pos": src.pos, "n_events": len(src.log.events), "checkpoints": ix.laps(),
                 "indexed_lap": ix.indexed_lap, "index_done": ix.done, "index_error": ix.error,
-                "copies": not ix.disabled}
+                "copies": not ix.disabled, "seek": dict(self._seek) if self._seek else None}
 
     def replay_marks(self) -> dict:
         out = self.replay_status()
@@ -1120,8 +1150,8 @@ class PitWallRuntime:
         return f
 
     @staticmethod
-    def _busy() -> dict:
-        return {"ok": False, "busy": True, "error": "the pit wall is answering another question: try again in a moment"}
+    def _busy(why: str = "the pit wall is answering another question: try again in a moment") -> dict:
+        return {"ok": False, "busy": True, "error": why}
 
     def ask(self, car: str | None, text: str, *, source: str = "text") -> dict:
         """Answer a question about ``car`` as of now: a what-if on the simulator, or a fact through the voice.
@@ -1137,6 +1167,8 @@ class PitWallRuntime:
         if not text:
             return {"ok": False, "error": "empty question"}
         t0 = time.perf_counter()
+        if self._seek is not None:
+            return self._busy("the pit wall is jumping to another lap: try again when it has arrived")
         if not self._ask_gate.acquire(timeout=ASK_WAIT_S):
             return self._busy()
         res = snap = None
@@ -1241,6 +1273,8 @@ class PitWallRuntime:
         except (TypeError, ValueError):
             return {"ok": False, "error": "stop lap must be a whole number"}
         t0 = time.perf_counter()
+        if self._seek is not None:
+            return self._busy("the pit wall is jumping to another lap: try again when it has arrived")
         if not self._ask_gate.acquire(timeout=ASK_WAIT_S):
             return self._busy()
         try:
@@ -1269,7 +1303,7 @@ class PitWallRuntime:
         return {"current": cur, "log": hist, "acks": list(self.acks_log)}
 
     def analysis(self, kind: str, car: str | None = None, other: str | None = None, lap=None, ref_lap=None) -> dict:
-        """The analysis panels as of now (``pitsense.insights``, ``pitsense.coach``): deg | evolution | compare | trace |
+        """The analysis panels as of now (``pitsense.insights``, ``pitsense.coach``): deg | evolution | laps | compare | trace |
         coach. ``coach`` compares ``car``'s ``lap`` with ``other``'s ``ref_lap`` (default: ``car``'s own best clean lap)."""
         from .. import coach as C
         from .. import insights as I
@@ -1289,6 +1323,8 @@ class PitWallRuntime:
                 return {"ok": False, "error": "unknown car"}
             if kind == "deg":
                 return {"ok": True, "kind": kind, "stints": I.tyre_deg(st, [car] if car else None)}
+            if kind == "laps" and car:
+                return {"ok": True, "kind": kind, **I.lap_times(st, [car] + ([other] if other and other != car else []))}
             if kind == "evolution":
                 return {"ok": True, "kind": kind, **I.track_evolution(st)}
             if kind == "compare" and car and other:
@@ -1304,7 +1340,7 @@ class PitWallRuntime:
                 if a is None or b is None:
                     return {"ok": False, "error": "no telemetry for one of the laps (the feeds keep about ten minutes)"}
                 return {"ok": True, "kind": kind, **C.compare(a, b)}
-        return {"ok": False, "error": "kind must be deg, evolution, compare (car, other), trace (car, lap) or coach (car, lap)"}
+        return {"ok": False, "error": "kind must be deg, evolution, laps (car[, other]), compare (car, other), trace (car, lap) or coach (car, lap)"}
 
     def set_risk(self, risk) -> dict:
         """How the strategy ranks plans from now on (expected | protect | aggressive); the next decision replans."""

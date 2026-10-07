@@ -5,9 +5,9 @@
     GET /api/calls         {"current": [...], "log": [...]}
     GET /api/alerts        {"active": [...], "log": [...]}
     GET /api/health        loop status, throughput, snapshot latency, model bundle
-    GET /api/analysis      ?kind=deg|evolution|compare|trace|coach&car=N[&other=M][&lap=L][&ref_lap=R]: analysis panels as of now
+    GET /api/analysis      ?kind=deg|evolution|laps|compare|trace|coach&car=N[&other=M][&lap=L][&ref_lap=R]: analysis panels as of now
     GET /api/replay/marks  replay controls state and bookmarks (calls, stops, SC/VSC, rain, mechanic alerts); enabled=false when live
-    POST /api/replay/pause|resume|speed|seek   {} | {} | {"speed": 1|5|20|"max"} | {"lap": N} or {"mark": id}; 409 in live mode
+    POST /api/replay/pause|resume|speed|seek|cancel   {} | {} | {"speed": 1|5|20|"max"} | {"lap": N[, "wait": false]} or {"mark": id} | {}; 409 in live mode
     GET /api/stream        server-sent events: "snapshot" (the snapshot JSON), "pos" (car positions, ~3 Hz), "status"
     GET /api/radio.wav     ?car=N[&i=ID]: our pit wall's message (latest, or by id), spoken (Piper TTS; 404 if not installed)
     GET /api/teamradio     ?car=N&i=K: the K-th real driver radio mp3 of car N (published clips only, audio/mpeg)
@@ -50,7 +50,7 @@ MAX_BODY = 8_000_000  # bytes: a question is a sentence; a recording a few secon
 WRITE_TIMEOUT_S = 8.0  # a viewer that accepts no data for this long is dropped
 MAX_VIEWERS = 64
 COOKIE = "pitsense_token"
-REPLAY_POSTS = ("/api/replay/pause", "/api/replay/resume", "/api/replay/speed", "/api/replay/seek")
+REPLAY_POSTS = ("/api/replay/pause", "/api/replay/resume", "/api/replay/speed", "/api/replay/seek", "/api/replay/cancel")
 PAGES = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/style.css": "style.css"}
 
 
@@ -155,8 +155,10 @@ def _handler(rt, token: str | None = None, max_viewers: int = MAX_VIEWERS):
                 out = rt.replay_resume()
             elif path.endswith("/speed"):
                 out = rt.replay_speed(req.get("speed"))
-            else:
-                out = rt.replay_seek(lap=req.get("lap"), mark=req.get("mark"))
+            elif path.endswith("/cancel"):
+                out = rt.replay_cancel()
+            else:  # {"wait": false} returns at once; the progress is in /api/replay/marks (seek)
+                out = rt.replay_seek(lap=req.get("lap"), mark=req.get("mark"), wait=req.get("wait") is not False)
             err = out.get("error", "")
             self._json(out, 200 if out.get("ok") else 409 if "disabled" in err else 422)
 
