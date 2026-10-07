@@ -89,6 +89,9 @@ def cmd_replay(a) -> None:
     from .views import timing_tower
 
     ref = None
+    for f in (a.file, a.fastf1_file):
+        if f and not Path(f).is_file():
+            raise SystemExit(f"no such recording: {f}")
     if a.file:
         from .live import load_recording
 

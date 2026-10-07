@@ -37,6 +37,8 @@ def build_source(a) -> Source:
         return LiveSource(out, minutes=a.minutes, no_auth=a.no_auth)
     if a.file and a.follow:
         return FollowSource(Path(a.file), follow=True)
+    if a.file and not Path(a.file).is_file():
+        raise SystemExit(f"no such recording: {a.file}")
     if a.file:  # a finished recording: replay it at --speed
         from ..live import load_recording
 
