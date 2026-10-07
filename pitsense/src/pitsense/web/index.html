@@ -19,7 +19,9 @@
   <select id="teamsel" class="teamsel" title="your team on this screen (saved in this browser)" aria-label="focus team"></select>
   <select id="risksel" class="teamsel" title="how the strategy ranks plans (for every screen)" aria-label="risk"><option value="expected">risk: best average</option><option value="protect">risk: protect</option><option value="aggressive">risk: aggressive</option></select>
   <div id="mode" class="chip">--</div>
+  <button id="errbadge" class="chip off errbadge" type="button" hidden></button>
   <div id="conn" class="chip off">connecting</div>
+  <button id="kbbtn" class="chip kbbtn" type="button" title="keyboard shortcuts" onclick="document.getElementById('kbhelp').hidden=false">?</button>
 </header>
 <div id="alarmbar" class="alarmbar green" role="status" aria-live="polite"><b>HEALTH</b> <span>checking...</span></div>
 <div id="replaybar" class="replaybar" hidden>
@@ -43,8 +45,8 @@
     <h2>Timing tower <small>click a car to pin it</small></h2>
     <table id="tower">
       <thead><tr>
-        <th>P</th><th>CAR</th><th>GAP</th><th class="x">INT</th><th>TYRE</th><th class="x">STOPS</th>
-        <th class="x">LAST</th><th>BOX NOW</th><th class="x">PIT %</th><th>CALL</th>
+        <th title="position">P</th><th>CAR</th><th title="gap to the leader">GAP</th><th class="x" title="interval to the car ahead">INT</th><th title="tyre compound and laps on it">TYRE</th><th class="x" title="pit stops made">STOPS</th>
+        <th class="x" title="last lap time">LAST</th><th title="where the car would rejoin if it boxed now (green = no places lost)">BOX NOW</th><th class="x" title="chance the car pits within 1 / 3 laps">PIT %</th><th title="the pit wall strategy call">CALL</th>
       </tr></thead>
       <tbody></tbody>
     </table>
@@ -89,6 +91,7 @@
     <section class="panel" data-tab="alerts"><h2>Race control</h2><div id="rc"></div></section>
   </aside>
 </main>
+<div id="kbhelp" class="kbhelp" hidden role="dialog" aria-label="keyboard shortcuts"><div><b>Keyboard</b><p><kbd>1</kbd>-<kbd>8</kbd> jump to a section</p><p><kbd>Space</kbd> pause / resume replay</p><p><kbd>&larr;</kbd> <kbd>&rarr;</kbd> one lap back / forward (<kbd>Shift</kbd> five)</p><p><kbd>?</kbd> this help &middot; <kbd>Esc</kbd> close</p><button type="button" onclick="document.getElementById('kbhelp').hidden=true">close</button></div></div>
 <script src="/app.js"></script>
 </body>
 </html>
