@@ -97,6 +97,11 @@ class ReplayIndex:
                     best = ck
             return best
 
+    def latest(self) -> Checkpoint | None:
+        """The checkpoint furthest into the race."""
+        with self.lock:
+            return max(self.checkpoints.values(), key=lambda ck: ck.idx, default=None)
+
     def laps(self) -> list[int]:
         with self.lock:
             return sorted({ck.lap for ck in self.checkpoints.values()})
@@ -119,6 +124,15 @@ def copy_memo(wall, ctx=None) -> dict:
     if type(rows) is dict:
         memo[id(rows)] = dict(rows)
     return memo
+
+
+def trim_memo(wall) -> None:
+    """Forget the models engineer's memo of predictions (called at each new leader lap). Keyed by the whole feature
+    row, its entries are almost never asked for again once the lap has moved on, and kept they grew ~20 MB a lap
+    (1.4 GB a race, and every checkpoint held a copy). A memo of a pure function: dropping entries changes nothing."""
+    rows = getattr(next((e for e in wall.engineers if e.name == "models"), None), "_memo", None)
+    if type(rows) is dict:
+        rows.clear()
 
 
 def ctx_caches(ctx) -> dict:
@@ -161,7 +175,10 @@ def scan_marks(log, index: ReplayIndex) -> None:
     prev_status = "1"
     index.n_events = len(log.events)
     for e in log.events:
-        st.apply(e)
+        try:
+            st.apply(e)
+        except Exception:  # a bad frame costs a bookmark at most
+            continue
         if st.track_status != prev_status:
             kind = TRACK_KINDS.get(st.track_status)
             if kind:

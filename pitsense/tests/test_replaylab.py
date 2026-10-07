@@ -272,3 +272,119 @@ def test_seek_to_lap_zero_is_the_start_of_the_race():
     rt = play_all(runtime())
     res = rt.replay_seek(0)
     assert res["ok"] and res["events"] == 0 and rt.state.current_lap == 0 and rt.latest is None
+
+
+def test_indexing_pass_carries_on_from_the_replays_own_checkpoint(monkeypatch):
+    """Behind the replay the indexing pass would only redo its work: it restores the replay's newest checkpoint and
+    plays on from there, ending exactly where a straight play ends."""
+    from pitsense.pitwall import runtime as runtime_mod
+
+    monkeypatch.setattr(runtime_mod, "INDEX_SLICE_S", 0.0)
+    player = play_all(runtime())  # it saved every lap itself
+    ix = player.replay_index
+    sub = PitWallRuntime(ReplaySource(make_log(), 0), models=False, replay_index=ix, indexer=True)
+    sub._player = player
+    sub.start()
+    assert sub.wait(60) and ix.done
+    assert sub.index_leaps >= 1 and sub.state.current_lap == 9
+    assert view(sub) == view(player)
+
+
+def test_background_jump_reports_progress_and_matches_a_straight_play():
+    ref = straight_to(6)
+    rt = play_all(runtime(checkpoint_every=100))  # only the start is saved: the jump plays forward
+    assert rt.replay_status()["seek"] is None
+    res = rt.replay_seek(6, wait=False)  # the loop has ended: runs in place, still correct
+    assert res["ok"] and rt.replay_status()["seek"] is None
+    assert view(rt) == view(ref)
+
+
+def test_background_jump_can_be_cancelled_and_questions_wait():
+    rt = runtime(checkpoint_every=100)
+    rt.start()
+    assert rt.wait(60)
+    slow = rt.handle
+    seen = []
+
+    def handle(e):
+        if rt._seek is not None:
+            seen.append(dict(rt._seek))
+            if len(seen) == 20:
+                assert rt.replay_cancel()["ok"]
+                assert rt.ask("22", "pit now?").get("busy")  # a question during the jump is turned away, not queued
+                assert rt.replay_seek(3, wait=False)["error"] == "a jump is already running"
+        slow(e)
+
+    rt.handle = handle
+    res = rt.replay_seek(9)
+    assert res["ok"] and res.get("cancelled") and res["lap"] < 9
+    assert seen and seen[-1]["target"] == 9 and seen[-1]["lap"] <= res["lap"]
+    assert rt.replay_status()["seek"] is None and rt.replay_cancel()["ok"] is False
+    rt.handle = slow
+    assert rt.replay_seek(9)["lap"] == 9  # the next jump is not marked cancelled
+    rt.stop()
+
+
+def test_cancel_endpoint():
+    rt = play_all(runtime())
+    srv = serve(rt, port=0)
+    try:
+        code, out = call(srv.server_address[1], "/api/replay/cancel", {})
+        assert code == 422 and out["error"] == "no jump is running"
+        code, out = call(srv.server_address[1], "/api/replay/seek", {"lap": 2, "wait": False})
+        assert code == 200 and out["ok"]
+    finally:
+        srv.shutdown()
+        rt.stop()
+
+
+def test_lap_times_analysis_marks_laps_that_are_not_pace():
+    rt = play_all(runtime())
+    car, other = list(rt.state.drivers)[:2]
+    out = rt.analysis("laps", car, other)
+    assert out["ok"] and set(out["cars"]) == {car, other}
+    c = out["cars"][car]
+    assert len(c["laps"]) == len(c["time_s"]) == len(c["kind"]) > 3 and set(c["kind"]) <= {"", "in", "out", "sc", "yellow"}
+    assert list(out["cars"]) == [car, other] and c["laps"] == sorted(c["laps"])
+    assert rt.analysis("laps", car)["cars"].keys() == {car}
+    assert rt.analysis("laps", "nope")["ok"] is False
+
+
+def test_checkpoint_buffers_copy_only_what_is_filled_and_behave_the_same():
+    import copy
+
+    import numpy as np
+
+    from pitsense.pitwall.engineers.mechanic_telemetry import Ref, Series
+
+    s, r = Series(100), Ref(50)
+    for i in range(7):
+        s.add(np.arange(10.0) + 10 * i, np.arange(10.0) * i)
+        r.add("a", np.arange(8.0) + i)
+    r.add("b", np.array([1.0, 2.0]))
+    s2, r2 = copy.deepcopy((s, r))
+    assert len(s.__getstate__()["t"]) == s.n < s.cap and len(r.__getstate__()["buf"]["b"]) == 2
+    assert s2.cap == 100 and len(s2.t) == 100 and s2.n == s.n
+    assert np.array_equal(s2.slice(30, 60)[1], s.slice(30, 60)[1]) and np.array_equal(s2.between(0, 99), s.between(0, 99))
+    assert len(r2.buf["a"]) == 50 and r2.count("b") == 2 and r2.n == r.n
+    assert all(np.array_equal(r2.buf[k][:r.count(k)], r.buf[k][:r.count(k)]) for k in r.buf)
+    s2.add(np.array([200.0]), np.array([5.0]))
+    r2.add("b", np.array([3.0]))  # a restored copy plays on
+    assert s2.n == s.n + 1 and r2.count("b") == 3
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_lap_chart_marks_in_out_and_sc_laps_and_the_dashboard_has_the_jump_progress():
+    html, js = (WEB / "index.html").read_text(encoding="utf-8"), js_source()
+    assert 'id="rb-cancel"' in html and 'id="rb-prog"' in html and 'value="laps"' in html
+    a, b = js.index("const LAP_KIND"), js.index("function anView")
+    prog = "const ANCOL = ['#a','#b'], esc = (s) => String(s), num = (x) => x.toFixed(1), fmtTime = (x) => String(x);\n" + js[a:b] + """
+const cars = {"1": {tla: "AAA", laps: [1, 2, 3, 4, 5], time_s: [90, 80, 100, 81, 150], kind: ["", "", "in", "out", "sc"], compound: []},
+              "2": {tla: "BBB", laps: [1, 2, 3], time_s: [91, 82, 83], kind: ["", "yellow", ""], compound: []}};
+console.log(lapChart(cars));
+"""
+    out = subprocess.run(["node", "-e", prog], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    svg = out.stdout
+    assert svg.count("<circle") == 2 + 3 and svg.count("<rect") == 1 and svg.count("(in-lap)") == 1 and "(out-lap)" in svg
+    assert "stroke-dasharray" in svg and "AAA (focus)" in svg and "BBB" in svg

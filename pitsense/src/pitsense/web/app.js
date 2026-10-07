@@ -10,6 +10,42 @@ let pinned = new Set();
 try { pinned = new Set(JSON.parse(localStorage.getItem("pinned") || "[]")); } catch (e) { /* no storage */ }
 let snap = null;
 
+// ---- robustness and speed helpers
+// setHtml writes only when the markup changed (no DOM churn; open dropdowns and scroll positions survive)
+const HTML = new WeakMap();
+function setHtml(node, html) {
+  if (!node || HTML.get(node) === html) return;
+  HTML.set(node, html);
+  node.innerHTML = html;
+}
+// a failing panel shows a small badge (click to clear) and never stops the others
+const PANEL_ERR = {};
+function showErrors() {
+  const b = $("errbadge");
+  if (!b) return;
+  const k = Object.keys(PANEL_ERR);
+  b.hidden = !k.length;
+  b.textContent = k.length ? k.length + " panel error" + (k.length > 1 ? "s" : "") : "";
+  b.title = k.map((n) => n + ": " + PANEL_ERR[n]).join("\n") + "\n(click to clear)";
+}
+function safe(name, fn) {
+  try { fn(); if (PANEL_ERR[name]) { delete PANEL_ERR[name]; showErrors(); } }
+  catch (e) { if (!PANEL_ERR[name]) { PANEL_ERR[name] = String((e && e.message) || e); showErrors(); } console.warn("panel " + name, e); }
+}
+// recurring fetch: pauses while the tab is hidden, never overlaps itself, backs off (x2, to 30 s) after failures
+function every(fn, ms) {
+  let fails = 0, timer = null;
+  const next = () => { timer = setTimeout(run, Math.min(ms * Math.pow(2, fails), 30000)); };
+  const run = () => {
+    timer = null;
+    if (document.hidden) { next(); return; }
+    Promise.resolve().then(fn).then(() => { fails = 0; }, () => { fails = Math.min(fails + 1, 5); }).then(next);
+  };
+  run();
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && timer) { clearTimeout(timer); run(); } });
+}
+const getJson = (url) => fetch(url).then((r) => { if (!r.ok) throw new Error(url + " " + r.status); return r.json(); });
+
 const fmtTime = (x) => {
   if (x == null) return "--";
   const m = Math.floor(x / 60), s = x - m * 60;
@@ -88,7 +124,7 @@ function renderCallbar(s) {
   const cars = mine.filter((n) => row[n]);
   $("callbar").hidden = !cars.length;
   const acks = s.extra.acks || {}, changes = s.extra.changes || {};
-  $("callbar").innerHTML = cars.map((n) => {
+  setHtml($("callbar"), cars.map((n) => {
     const r = row[n], c = calls[n], act = c ? c.action : "NO_CALL", k = acks[n], ch = changes[n];
     // the operator's answer stands for this call while the call (action and tyre) is the same
     const same = k && c && k.action === c.action && (k.compound || null) === (c.compound || null);
@@ -97,7 +133,7 @@ function renderCallbar(s) {
         '<button class="ackb" data-car="' + esc(n) + '" data-d="reject" title="reject this call (you can give a reason)">&#10007;</button>' : "";
     const why = ch ? '<small class="chg" title="' + esc(ch.why.join("; ")) + '">was ' + esc(ch.from.toLowerCase()) + ": " + esc(ch.why[0]) + "</small>" : "";
     return '<span class="cb"><b>' + esc(r.tla || n) + "</b> P" + (r.position == null ? "-" : r.position) + " " + action(act) + " " + ans + why + "</span>";
-  }).join("");
+  }).join(""));
 }
 // the operator's accept / reject: logged for the post-race review (pitsense shadow-score), never fed back to the engineers
 $("callbar").addEventListener("click", (e) => {
@@ -162,7 +198,7 @@ function renderQuali(s) {
       "</td><td>" + (v.quali__p_ko == null ? "--" : pct(v.quali__p_ko)) + '</td><td class="' + sd[1] + '">' + sd[0] +
       (v.quali__laps_needed && v.quali__send !== "SAFE" ? " (" + v.quali__laps_needed + " lap" + (v.quali__laps_needed > 1 ? "s" : "") + ")" : "") + "</td></tr>");
   }
-  document.querySelector("#qtab tbody").innerHTML = rows.join("");
+  setHtml(document.querySelector("#qtab tbody"), rows.join(""));
 }
 
 function renderTower(s) {
@@ -187,9 +223,9 @@ function renderTower(s) {
       "<td>" + fmtTime(r.last_lap_time) + "</td>" +
       '<td class="' + rjc + '">' + (r.in_pit ? "in pit" : rj == null ? "--" : "P" + Math.round(rj)) + "</td>" +
       '<td class="' + hot + '">' + (p1 == null && p3 == null ? "--" : pct(p1) + " / " + pct(p3)) + "</td>" +
-      "<td>" + (call && call.action !== "NO_CALL" ? action(call.action) : "") + "</td></tr>");
+      "<td" + (call && call.reasons && call.reasons.length ? ' title="' + esc(call.reasons.map((x) => x.text).join("; ")) + '"' : "") + ">" + (call && call.action !== "NO_CALL" ? action(call.action) : "") + "</td></tr>");
   }
-  document.querySelector("#tower tbody").innerHTML = rows.join("");
+  setHtml(document.querySelector("#tower tbody"), rows.join(""));
   $("out").textContent = out.length ? "Out: " + out.join(", ") : "";
 }
 
@@ -551,7 +587,7 @@ function frame(now) {
 function drawOverlays() {
   const g = MAP.layers && MAP.layers.over;
   if (!g || !snap) return;
-  g.innerHTML = "";
+  if (g.firstChild) g.textContent = "";
   const all = $("ovall") && $("ovall").checked, mine = focusSet(), cars = snap.cars || {}, byPos = {};
   for (const r of snap.tower || []) if (r.running && r.position) byPos[r.position] = r.car;
   for (const r of snap.tower || []) {
@@ -620,11 +656,11 @@ window.addEventListener("resize", scaleMap);
 function renderFocus(s) {
   const mine = [...focusSet()];
   $("focusnote").textContent = baseFocus().length ? focusName() : "no team set: pick one above or pin cars from the tower";
-  if (!mine.length) { $("focus").innerHTML = '<div class="empty">Start with --team, or click a car in the tower.</div>'; return; }
+  if (!mine.length) { setHtml($("focus"), '<div class="empty">Start with --team, or click a car in the tower.</div>'); return; }
   const row = {}, calls = {};
   for (const r of s.tower) row[r.car] = r;
   for (const c of s.calls || []) calls[c.car] = c;
-  $("focus").innerHTML = mine.filter((n) => row[n]).map((n) => {
+  setHtml($("focus"), mine.filter((n) => row[n]).map((n) => {
     const r = row[n], v = (s.cars || {})[n] || {}, c = calls[n];
     const reasons = c && c.reasons && c.reasons.length ? "<ul>" + c.reasons.map((x) => "<li>" + esc(x.text) + "</li>").join("") + "</ul>" : "";
     const conf = c && c.confidence != null ? '<span class="kv">confidence <span>' + pct(c.confidence) + "</span></span>" : "";
@@ -637,7 +673,7 @@ function renderFocus(s) {
       '<div class="kv"><span>box now &rarr; ' + (v.pitstop__rejoin_if_box_now != null ? "P" + Math.round(v.pitstop__rejoin_if_box_now) : "--") + "</span>" +
       "<span>deg " + num(v.tyre__deg_s_per_lap, 3) + " s/lap</span><span>cliff " + pct(v.tyre__cliff_risk) + "</span>" +
       "<span>undercut threat " + pct(v.rivals__undercut_threat) + "</span><span>chance " + pct(v.rivals__undercut_chance) + "</span></div></div>";
-  }).join("");
+  }).join(""));
 }
 
 // ---- strategy comparison: the simulator's best plans side by side, with the spread of outcomes
@@ -668,18 +704,18 @@ function renderStrategy(s) {
     return '<div class="sc-car">' + head + '<table class="sc-tab"><thead><tr><th></th><th>PLAN</th><th>EXP</th><th>OUTCOMES (P1 &rarr; P' + n +
       ')</th><th>VS A</th><th>PTS</th></tr></thead><tbody>' + rows + "</tbody></table>" + sc + dist + "</div>";
   });
-  $("strat").innerHTML = html.length ? html.join("") : '<div class="empty">Pick a team above or pin cars from the tower to compare strategies.</div>';
+  setHtml($("strat"), html.length ? html.join("") : '<div class="empty">Pick a team above or pin cars from the tower to compare strategies.</div>');
 }
 
 function renderAlerts(s) {
   const al = s.alerts || [], rc = s.extra.rc || [], order = {critical: 0, warn: 1, info: 2};
-  $("alerts").innerHTML = al.length
+  setHtml($("alerts"), al.length
     ? al.slice().sort((a, b) => order[a.severity] - order[b.severity]).map((a) =>
       '<div class="alert ' + esc(a.severity) + '">' + esc(a.message) + " <small>" + esc(a.engineer) + (a.car ? " #" + esc(a.car) : "") + "</small></div>").join("")
-    : '<div class="empty">No active alerts.</div>';
-  $("rc").innerHTML = rc.length
+    : '<div class="empty">No active alerts.</div>');
+  setHtml($("rc"), rc.length
     ? rc.slice().reverse().map((m) => '<div class="rc"><b>' + fmtClock(m.t) + "</b> " + esc(m.message) + "</div>").join("")
-    : '<div class="empty">None.</div>';
+    : '<div class="empty">None.</div>');
 }
 
 // ---- charts (Strategy tab): gap chart, stint chart, what-if, call history. Plain SVG; data from extra.charts and /api/calls.
@@ -845,41 +881,61 @@ function renderCallHistory(s) {
   if (sig === callsSig || callsBusy) return;
   callsSig = sig;
   callsBusy = true;
-  fetch("/api/calls").then((r) => r.json()).then((r) => { callsLog = r.log || []; }).catch(() => {}).then(() => { callsBusy = false; if (snap) drawCalls(snap); });
+  getJson("/api/calls").then((r) => { callsLog = r.log || []; }).catch(() => {}).then(() => { callsBusy = false; if (snap) drawCalls(snap); });
 }
+let chartsSig = "", chartsTab = "";
 function renderCharts(s) {
+  const sig = s.lap + "|" + JSON.stringify((s.extra || {}).charts || 0) + "|" + [...focusSet()].join(",") + "|" + ((s.race || {}).pitstop__loss_now || 0);
+  if (sig === chartsSig && tab === chartsTab) return;
+  chartsSig = sig; chartsTab = tab;
   if (tab !== "strategy" && window.innerWidth <= 760) return;  // phones show one tab at a time; redrawn when the tab opens
   renderGaps(s); renderStints(s); syncWiCars(s); syncWiLap(s); renderCallHistory(s);
 }
 
+// snapshots can arrive faster than a screen refreshes: keep the newest, draw once per frame, not at all while hidden
+let radioSig = "", pending = null, drawQueued = false;
 function render(s) {
   if (!s || s.waiting) return;
   s.extra = s.extra || {};
-  snap = s;
-  syncTeamSel(s); renderHeader(s); renderQuali(s); renderTower(s); renderFocus(s); renderStrategy(s); renderCharts(s); renderCallbar(s); renderRisk(s); renderAlerts(s);
-  if (s.extra.team_radio) radioList = s.extra.team_radio;
-  if (s.extra.positions) onPositions(s.extra.positions);
-  renderMap(s); renderConvo(s); renderChamp(s);
-  if (s.extra.telemetry) renderDriver(s.extra.telemetry);
+  snap = s; pending = s;
+  if (!drawQueued && !document.hidden) { drawQueued = true; requestAnimationFrame(drawNow); }
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && pending && !drawQueued) { drawQueued = true; requestAnimationFrame(drawNow); } });
+function drawNow() {
+  drawQueued = false;
+  const s = pending;
+  if (!s) return;
+  pending = null;
+  safe("header", () => { syncTeamSel(s); renderHeader(s); renderQuali(s); renderRisk(s); });
+  safe("tower", () => renderTower(s));
+  safe("team", () => renderFocus(s));
+  safe("strategy", () => renderStrategy(s));
+  safe("charts", () => renderCharts(s));
+  safe("calls", () => renderCallbar(s));
+  safe("alerts", () => renderAlerts(s));
+  safe("map", () => { if (s.extra.positions) onPositions(s.extra.positions); renderMap(s); });
+  safe("radio", () => { if (s.extra.team_radio) radioList = s.extra.team_radio; renderConvo(s); });
+  safe("season", () => renderChamp(s));
+  safe("driver", () => { if (s.extra.telemetry) renderDriver(s.extra.telemetry); });
 }
 
 // championship: points before this race, the race's points in the current order, projected total and places moved
 function renderChamp(s) {
   const c = s.extra.championship;
-  if (!c) { $("champ").innerHTML = '<div class="empty">No season results cached: run <code>pitsense standings --year ' + esc(String(new Date().getFullYear())) + "</code>.</div>"; return; }
+  if (!c) { setHtml($("champ"), '<div class="empty">No season results cached: run <code>pitsense standings --year ' + esc(String(new Date().getFullYear())) + "</code>.</div>"); return; }
   const mine = new Set([...focusSet()].map((n) => ((s.tower || []).find((r) => r.car === n) || {}).tla));
-  $("champ").innerHTML = '<table class="champ"><thead><tr><th>P</th><th>driver</th><th>before</th><th>race</th><th>total</th><th></th></tr></thead><tbody>' +
+  setHtml($("champ"), '<table class="champ"><thead><tr><th>P</th><th>driver</th><th>before</th><th>race</th><th>total</th><th></th></tr></thead><tbody>' +
     c.slice(0, 22).map((r) => "<tr" + (mine.has(r.tla) ? ' class="mine"' : "") + "><td>" + r.rank + "</td><td><b>" + esc(r.tla) + "</b> <small>" + esc(r.team || "") +
       "</small></td><td>" + r.points + "</td><td>" + (r.race ? "+" + r.race : "") + "</td><td><b>" + r.projected + "</b></td><td class=\"" +
-      (r.delta > 0 ? "up" : r.delta < 0 ? "down" : "") + "\">" + (r.delta ? (r.delta > 0 ? "&#9650;" : "&#9660;") + Math.abs(r.delta) : "") + "</td></tr>").join("") + "</tbody></table>";
+      (r.delta > 0 ? "up" : r.delta < 0 ? "down" : "") + "\">" + (r.delta ? (r.delta > 0 ? "&#9650;" : "&#9660;") + Math.abs(r.delta) : "") + "</td></tr>").join("") + "</tbody></table>");
 }
 
 // driver card: speed, gear, throttle and brake of our cars, from the newest published CarData sample
 function renderDriver(tel) {
   const mine = [...focusSet()].slice(0, 4), tla = {};
   for (const r of (snap && snap.tower) || []) tla[r.car] = r.tla;
-  if (!mine.length) { $("drivercard").innerHTML = '<div class="empty">Pick a team or pin a car.</div>'; return; }
-  $("drivercard").innerHTML = mine.map((n) => {
+  if (!mine.length) { setHtml($("drivercard"), '<div class="empty">Pick a team or pin a car.</div>'); return; }
+  setHtml($("drivercard"), mine.map((n) => {
     const v = tel[n];
     if (!v) return '<div class="card"><b>' + esc(tla[n] || n) + '</b> <span class="dim">no telemetry (record or fetch with CarData.z)</span></div>';
     const [spd, gear, thr, brk, drs] = v;
@@ -887,7 +943,7 @@ function renderDriver(tel) {
       '<div><span class="big">' + num(spd, 0) + '</span> km/h &middot; gear <span class="big">' + num(gear, 0) + "</span></div>" +
       '<div class="bar thr" title="throttle"><i style="width:' + Math.max(0, Math.min(100, thr || 0)) + '%"></i></div>' +
       '<div class="bar brk" title="brake"><i style="width:' + (brk ? 100 : 0) + '%"></i></div></div>';
-  }).join("");
+  }).join(""));
 }
 
 document.querySelector("#tower tbody").addEventListener("click", (e) => {
@@ -901,19 +957,22 @@ document.querySelector("#tower tbody").addEventListener("click", (e) => {
 
 function conn(ok, text) { const c = $("conn"); c.textContent = text; c.className = "chip " + (ok ? "on" : "off"); }
 function poll() {
-  setInterval(() => fetch("/api/snapshot").then((r) => r.json()).then((s) => { conn(true, "polling"); render(s); })
-    .catch(() => conn(false, "offline")), 2000);
+  every(() => getJson("/api/snapshot").then((s) => { conn(true, "polling"); render(s); }, (e) => { conn(false, "offline"); throw e; }), 2000);
 }
 if (window.EventSource) {
   const es = new EventSource("/api/stream");
   es.onopen = () => conn(true, "live");
   es.onerror = () => conn(false, "reconnecting");
-  es.addEventListener("snapshot", (e) => render(JSON.parse(e.data)));
+  es.addEventListener("snapshot", (e) => { try { render(JSON.parse(e.data)); } catch (err) { console.warn("bad snapshot", err); } });
   es.addEventListener("pos", (e) => {
+    if (document.hidden) return;
     const m = JSON.parse(e.data);
-    if (m.team_radio) { radioList = m.team_radio; if (snap) renderConvo(snap); }
-    onPositions(m);
-    if (m.telemetry) renderDriver(m.telemetry);
+    safe("map", () => onPositions(m));
+    if (m.team_radio) safe("radio", () => {
+      const sig = m.team_radio.length + ":" + (m.team_radio.length ? m.team_radio[m.team_radio.length - 1].id : "");
+      if (sig !== radioSig) { radioSig = sig; radioList = m.team_radio; if (snap) renderConvo(snap); }
+    });
+    if (m.telemetry) safe("driver", () => renderDriver(m.telemetry));
   });
   es.addEventListener("status", (e) => { if (JSON.parse(e.data).status === "finished") conn(true, "feed ended"); });
 } else poll();
@@ -934,18 +993,19 @@ function alarmView(alarms) {
 // alarms:end
 function pollHealth() {
   const bar = $("alarmbar");
-  fetch("/api/health").then((r) => r.json()).then((h) => {
+  return getJson("/api/health").then((h) => {
     const v = alarmView(h.alarms);
     bar.className = "alarmbar " + v.cls;
-    bar.innerHTML = v.html;
+    setHtml(bar, v.html);
     fitBars();
-  }).catch(() => {
+  }).catch((e) => {
     bar.className = "alarmbar red";
-    bar.innerHTML = "<b>1 ALARM</b><ul><li>RED: the pit wall server does not answer</li></ul>";
+    setHtml(bar, "<b>1 ALARM</b><ul><li>RED: the pit wall server does not answer</li></ul>");
     fitBars();
+    throw e;
   });
 }
-pollHealth(); setInterval(pollHealth, 3000);
+every(pollHealth, 3000);
 
 // ---- replay lab: pause, speed, lap slider, jump, bookmarks on a timeline
 let rmarks = null, rbBusy = false;
@@ -954,7 +1014,13 @@ function replayPost(path, body) {
   return fetch("/api/replay/" + path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})})
     .then((r) => r.json()).catch(() => ({ok: false, error: "no answer"}));
 }
+let tlSig = "";
 function drawTimeline(m) {
+  const sig = m.total_laps + "|" + m.marks.map((k) => k.id + (k.ahead ? "a" : "")).join(",");
+  if (sig !== tlSig) { tlSig = sig; drawTimelineMarks(m); }
+  $("tl-cur").style.left = Math.min(100, (m.lap / (m.total_laps || Math.max(m.lap, 1))) * 100) + "%";
+}
+function drawTimelineMarks(m) {
   const tl = $("timeline"), total = m.total_laps || Math.max(m.lap, 1);
   tl.querySelectorAll(".tl-mark").forEach((n) => n.remove());
   for (const k of m.marks) {
@@ -982,21 +1048,37 @@ function renderReplay(m) {
   if (document.activeElement !== sl) sl.value = m.lap;
   $("rb-num").max = sl.max;
   drawTimeline(m);
-  if (!rbBusy) $("rb-note").textContent = "lap " + m.lap + " / " + (m.total_laps || "?") + (m.index_done ? "  | every lap ready" : "  | ready to lap " + m.indexed_lap);
+  const sk = m.seek, prog = $("rb-prog");
+  prog.hidden = $("rb-cancel").hidden = !sk;
+  if (sk) {
+    prog.max = Math.max(sk.target, 1);
+    prog.value = Math.min(sk.lap, prog.max);
+    $("rb-note").textContent = "jumping: lap " + sk.lap + " / " + sk.target + " (the last picture stays up)";
+  } else if (!rbBusy) $("rb-note").textContent = "lap " + m.lap + " / " + (m.total_laps || "?") + (m.index_done ? "  | every lap ready" : "  | ready to lap " + m.indexed_lap);
   fitBars();
 }
 function pollReplay() {
-  fetch("/api/replay/marks").then((r) => r.json()).then(renderReplay).catch(() => {});
+  return getJson("/api/replay/marks").then((m) => safe("replay", () => renderReplay(m)));
 }
 function seekTo(body) {
   rbBusy = true;
   $("rb-note").textContent = "jumping...";
-  replayPost("seek", body).then((r) => {
+  replayPost("seek", Object.assign({wait: false}, body)).then((r) => {
+    if (r.ok && r.started) { watchSeek(); return; }  // the jump runs on in the pit wall: follow its progress
     rbBusy = false;
     $("rb-note").textContent = r.ok ? "jumped to lap " + r.lap + " in " + r.ms + " ms (" + r.via + ")" : "jump failed: " + (r.error || "");
     pollReplay();
   });
 }
+function watchSeek() {  // poll the jump's progress until it is over
+  getJson("/api/replay/marks").then((m) => {
+    safe("replay", () => renderReplay(m));
+    if (m.seek) { setTimeout(watchSeek, 300); return; }
+    rbBusy = false;
+    $("rb-note").textContent = "at lap " + m.lap + " / " + (m.total_laps || "?");
+  }, () => setTimeout(watchSeek, 1000));
+}
+$("rb-cancel").addEventListener("click", () => { $("rb-cancel").hidden = true; replayPost("cancel").then(pollReplay); });
 $("rb-pause").addEventListener("click", () => replayPost(rmarks && rmarks.paused ? "resume" : "pause").then(pollReplay));
 $("rb-speeds").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) replayPost("speed", {speed: b.dataset.speed}).then(pollReplay); });
 $("rb-lap").addEventListener("change", (e) => seekTo({lap: +e.target.value}));
@@ -1010,7 +1092,7 @@ $("timeline").addEventListener("click", (e) => {
     seekTo({lap: Math.round(((e.clientX - r.left) / r.width) * (rmarks.total_laps || rmarks.lap))});
   }
 });
-pollReplay(); setInterval(pollReplay, 4000);
+every(pollReplay, 4000);
 $("ovall").addEventListener("change", drawOverlays);
 
 // ---- analysis panels (GET /api/analysis): a small SVG line chart for each
@@ -1029,8 +1111,39 @@ function lineChart(series, xl, yl) {  // series: [{name, pts: [[x, y]...], color
     '<div class="ch-leg">' + series.filter((s) => s.name).map((s) => '<span><i style="background:' + (s.color || "var(--accent)") + '"></i>' + esc(s.name) + "</span>").join("") + "</div>";
 }
 const ANCOL = ["#19e3c3", "#ff8a3d", "#7aa2ff", "#e05cff", "#ffd23d", "#6bff6b"];
+// lap times of one or two drivers: pace laps joined by a line, in/out laps (diamond) and safety-car laps (square) drawn
+// hollow at the top edge so they do not squash the scale; the first driver (the focus car) is the thick line
+const LAP_KIND = {in: "in-lap", out: "out-lap", sc: "SC / VSC / red flag", yellow: "yellow flag"};
+function lapChart(cars) {
+  const W = 640, H = 240, L = 46, B = 26, T = 14, list = Object.values(cars);
+  const pace = list.flatMap((c) => c.time_s.filter((t, i) => !c.kind[i] || c.kind[i] === "yellow"));
+  const laps = list.flatMap((c) => c.laps);
+  if (!pace.length) return '<div class="empty">no clean laps yet</div>';
+  const x0 = Math.min(...laps), x1 = Math.max(...laps), y0 = Math.min(...pace), y1 = Math.max(...pace);
+  const X = (x) => L + (W - L - 8) * (x - x0) / ((x1 - x0) || 1), Y = (y) => H - B - (H - B - T - 8) * (Math.min(y, y1) - y0) / ((y1 - y0) || 1);
+  let out = "";
+  list.forEach((c, k) => {
+    const col = ANCOL[k], w = k ? 1.4 : 2.6;
+    let d = "", prev = -9;
+    const dots = c.laps.map((lap, i) => {
+      const kind = c.kind[i], t = c.time_s[i], tip = "<title>" + esc(c.tla) + " lap " + lap + ": " + fmtTime(t) + (kind ? " (" + LAP_KIND[kind] + ")" : "") + "</title>";
+      if (kind === "in" || kind === "out") return '<path d="M' + X(lap).toFixed(1) + " " + (T - 5) + "l4 4l-4 4l-4 -4z\" fill=\"none\" stroke=\"" + col + '">' + tip + "</path>";
+      if (kind === "sc") return '<rect x="' + (X(lap) - 3.5).toFixed(1) + '" y="' + (T - 4) + '" width="7" height="7" fill="none" stroke="' + col + '">' + tip + "</rect>";
+      d += (lap === prev + 1 ? "L" : "M") + X(lap).toFixed(1) + " " + Y(t).toFixed(1);
+      prev = lap;
+      return '<circle cx="' + X(lap).toFixed(1) + '" cy="' + Y(t).toFixed(1) + '" r="' + (k ? 2 : 2.8) + '" fill="' + col + '"' + (kind ? ' fill-opacity=".4"' : "") + ">" + tip + "</circle>";
+    }).join("");
+    out += '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="' + w + '"' + (k ? ' stroke-dasharray="4 3"' : "") + "/>" + dots;
+  });
+  return '<svg viewBox="0 0 ' + W + " " + H + '" class="anchart"><text x="4" y="12" class="dim">lap time (s)</text>' +
+    '<text x="' + (W - 4) + '" y="' + (H - 6) + '" text-anchor="end" class="dim">lap</text>' +
+    '<text x="4" y="' + (H - B) + '" class="dim">' + num(y0, 1) + '</text><text x="4" y="' + (T + 10) + '" class="dim">' + num(y1, 1) + "</text>" + out + "</svg>" +
+    '<div class="ch-leg">' + list.map((c, k) => '<span><i style="background:' + ANCOL[k] + '"></i>' + esc(c.tla) + (k ? "" : " (focus)") + "</span>").join("") +
+    "<span>&#9671; in/out lap</span><span>&#9633; SC / VSC / red</span><span>faded dot: yellow flag</span></div>";
+}
 function anView(r) {
   if (!r.ok) return '<div class="empty">' + esc(r.error || "no answer") + "</div>";
+  if (r.kind === "laps") return lapChart(r.cars);
   if (r.kind === "deg") {
     const st = r.stints.filter((s) => s.line).slice(0, 6);
     return lineChart(st.flatMap((s, i) => [{name: s.tla + " " + (s.compound || "") + " " + num(s.deg_s_per_lap, 3) + " s/lap", color: ANCOL[i % 6], pts: s.points},
@@ -1063,7 +1176,7 @@ function deltaMap(seg) {  // the reference line: red where this lap loses time, 
 function anCars() {
   if (!snap) return;
   const opts = (snap.tower || []).map((r) => '<option value="' + esc(r.car) + '">' + esc(r.tla || r.car) + "</option>").join("");
-  for (const id of ["ana", "anb"]) { const s = $(id), v = s.value; if (s.options.length <= 1) { s.insertAdjacentHTML("beforeend", opts); if (v) s.value = v; } }
+  for (const id of ["ana", "anb"]) { const s = $(id), v = s.value; if (s.options.length <= 1) { s.insertAdjacentHTML("beforeend", opts); if (v) s.value = v; else if (id === "ana" && snap.focus && snap.focus[0]) s.value = snap.focus[0]; } }
 }
 $("anform").addEventListener("submit", (e) => {
   e.preventDefault();
@@ -1073,4 +1186,34 @@ $("anform").addEventListener("submit", (e) => {
   fetch("/api/analysis?" + q).then((r) => r.json()).then((r) => { $("anout").innerHTML = anView(r); })
     .catch(() => { $("anout").innerHTML = '<div class="empty">the pit wall did not answer</div>'; });
 });
-setInterval(anCars, 3000);
+every(() => { anCars(); }, 3000);
+
+// ---- keyboard: 1-8 jump to a section, space pause/resume (replay), left/right one lap back/forward, ? help
+const TAB_KEYS = () => [...document.querySelectorAll("#tabs button")].map((b) => b.dataset.tab);
+let seekTimer = null, seekLap = null;
+function jumpSection(t) {
+  setTab(t);
+  if (window.innerWidth >= 700) {
+    const p = document.querySelector('.panel[data-tab="' + t + '"]:not([hidden])');
+    if (p) { p.scrollIntoView({behavior: "smooth", block: "start"}); p.classList.add("flash"); setTimeout(() => p.classList.remove("flash"), 900); }
+  }
+}
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target, tag = t && t.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) return;
+  const k = e.key;
+  if (k >= "1" && k <= "9") { const tabs = TAB_KEYS(); if (tabs[+k - 1]) { e.preventDefault(); jumpSection(tabs[+k - 1]); } }
+  else if (k === " " && rmarks && tag !== "BUTTON") { e.preventDefault(); replayPost(rmarks.paused ? "resume" : "pause").then(pollReplay); }
+  else if ((k === "ArrowLeft" || k === "ArrowRight") && rmarks) {
+    e.preventDefault();
+    const step = (k === "ArrowRight" ? 1 : -1) * (e.shiftKey ? 5 : 1), total = rmarks.total_laps || rmarks.lap;
+    seekLap = Math.max(1, Math.min(total, (seekLap == null ? rmarks.lap : seekLap) + step));
+    $("rb-note").textContent = "jump to lap " + seekLap + "...";
+    clearTimeout(seekTimer);  // holding the key coalesces into one seek
+    seekTimer = setTimeout(() => { const l = seekLap; seekLap = null; seekTo({lap: l}); }, 250);
+  } else if (k === "?") { $("kbhelp").hidden = !$("kbhelp").hidden; }
+  else if (k === "Escape") { $("kbhelp").hidden = true; }
+});
+$("errbadge").addEventListener("click", () => { for (const n in PANEL_ERR) delete PANEL_ERR[n]; showErrors(); });
+window.addEventListener("unhandledrejection", (e) => { console.warn("unhandled", e.reason); });

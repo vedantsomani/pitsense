@@ -19,7 +19,9 @@
   <select id="teamsel" class="teamsel" title="your team on this screen (saved in this browser)" aria-label="focus team"></select>
   <select id="risksel" class="teamsel" title="how the strategy ranks plans (for every screen)" aria-label="risk"><option value="expected">risk: best average</option><option value="protect">risk: protect</option><option value="aggressive">risk: aggressive</option></select>
   <div id="mode" class="chip">--</div>
+  <button id="errbadge" class="chip off errbadge" type="button" hidden></button>
   <div id="conn" class="chip off">connecting</div>
+  <button id="kbbtn" class="chip kbbtn" type="button" title="keyboard shortcuts" onclick="document.getElementById('kbhelp').hidden=false">?</button>
 </header>
 <div id="alarmbar" class="alarmbar green" role="status" aria-live="polite"><b>HEALTH</b> <span>checking...</span></div>
 <div id="replaybar" class="replaybar" hidden>
@@ -29,6 +31,7 @@
     <input id="rb-lap" type="range" min="0" max="1" value="0" step="1" aria-label="lap slider">
     <input id="rb-num" type="number" min="0" max="1000" value="1" aria-label="jump to lap"><button id="rb-go" type="button">Go to lap</button>
     <span id="rb-note" class="rb-note"></span>
+    <progress id="rb-prog" max="1" value="0" hidden aria-label="jump progress"></progress><button id="rb-cancel" type="button" hidden>Cancel jump</button>
   </div>
   <div id="timeline" class="timeline" aria-label="bookmarks"><div id="tl-cur" class="tl-cur"></div></div>
   <div class="rb-legend"><span class="m-call">calls</span><span class="m-pit">pit stops</span><span class="m-SC">SC</span><span class="m-VSC">VSC</span><span class="m-RED">red flag</span><span class="m-rain">rain</span><span class="m-mechanic">mechanic</span><span class="rb-dim">dim = later in the race</span></div>
@@ -43,8 +46,8 @@
     <h2>Timing tower <small>click a car to pin it</small></h2>
     <table id="tower">
       <thead><tr>
-        <th>P</th><th>CAR</th><th>GAP</th><th class="x">INT</th><th>TYRE</th><th class="x">STOPS</th>
-        <th class="x">LAST</th><th>BOX NOW</th><th class="x">PIT %</th><th>CALL</th>
+        <th title="position">P</th><th>CAR</th><th title="gap to the leader">GAP</th><th class="x" title="interval to the car ahead">INT</th><th title="tyre compound and laps on it">TYRE</th><th class="x" title="pit stops made">STOPS</th>
+        <th class="x" title="last lap time">LAST</th><th title="where the car would rejoin if it boxed now (green = no places lost)">BOX NOW</th><th class="x" title="chance the car pits within 1 / 3 laps">PIT %</th><th title="the pit wall strategy call">CALL</th>
       </tr></thead>
       <tbody></tbody>
     </table>
@@ -79,7 +82,7 @@
     <section class="panel" data-tab="team"><h2>Driver <small>live telemetry of our cars</small></h2><div id="drivercard" class="drv"></div></section>
     <section class="panel" data-tab="analysis"><h2>Analysis <small>as of now &middot; clean laps: green, no lap 1, no in/out laps, &ge; 1 s to the car ahead, fuel-corrected</small></h2>
       <form id="anform" class="anform">
-        <select id="ankind" aria-label="panel"><option value="deg">tyre degradation</option><option value="evolution">track evolution</option><option value="compare">compare two drivers</option><option value="trace">speed trace</option><option value="coach">driving coach</option></select>
+        <select id="ankind" aria-label="panel"><option value="deg">tyre degradation</option><option value="evolution">track evolution</option><option value="laps">lap times (driver vs second)</option><option value="compare">compare two drivers</option><option value="trace">speed trace</option><option value="coach">driving coach</option></select>
         <select id="ana" aria-label="driver"></select><select id="anb" aria-label="second driver"><option value="">(second driver)</option></select>
         <input id="anlap" type="number" min="1" placeholder="lap" aria-label="lap"><input id="anref" type="number" min="1" placeholder="ref lap" aria-label="reference lap">
         <button id="anbtn">show</button>
@@ -89,6 +92,7 @@
     <section class="panel" data-tab="alerts"><h2>Race control</h2><div id="rc"></div></section>
   </aside>
 </main>
+<div id="kbhelp" class="kbhelp" hidden role="dialog" aria-label="keyboard shortcuts"><div><b>Keyboard</b><p><kbd>1</kbd>-<kbd>8</kbd> jump to a section</p><p><kbd>Space</kbd> pause / resume replay</p><p><kbd>&larr;</kbd> <kbd>&rarr;</kbd> one lap back / forward (<kbd>Shift</kbd> five)</p><p><kbd>?</kbd> this help &middot; <kbd>Esc</kbd> close</p><button type="button" onclick="document.getElementById('kbhelp').hidden=true">close</button></div></div>
 <script src="/app.js"></script>
 </body>
 </html>

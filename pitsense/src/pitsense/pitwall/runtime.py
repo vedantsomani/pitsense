@@ -28,6 +28,7 @@ Around it: ``sources.py`` (replay, follow, live), ``shadow.py`` (scoring a call 
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
 import logging
@@ -65,6 +66,8 @@ SNAPSHOT_SCHEMA = 2  # snapshot layout version: 2 adds "schema", "predictions" a
 SNAP_MS_KEEP = 1000  # snapshot build times kept for health()
 VOICE_QUEUE = 4  # calls waiting for the voice (one per car; when full the oldest is dropped)
 ASK_WAIT_S = 10.0  # a question waits this long for the one running before it, then gets "busy"
+INDEX_SLICE_S = 0.02  # the indexing pass works in slices this long, and between them...
+INDEX_YIELD_ABOVE = 5.0  # ...waits while the replay plays faster than this (x); slower ones leave the CPU mostly idle
 
 
 # ----------------------------------------------------------------------------- runtime
@@ -78,7 +81,12 @@ def _merge(into: dict, update: dict) -> None:
 
 
 def _json_bytes(obj) -> bytes:
-    return json.dumps(obj, separators=(",", ":"), allow_nan=False, default=str).encode()
+    try:
+        return json.dumps(obj, separators=(",", ":"), allow_nan=False, default=str).encode()
+    except ValueError:  # a NaN / inf from an engineer's details or a chart: null, never a dead loop
+        from .types import jsonable
+
+        return json.dumps(jsonable(obj), separators=(",", ":"), allow_nan=False, default=str).encode()
 
 
 def _call_key(c: dict) -> tuple:
@@ -114,6 +122,10 @@ class _VoiceJob:
     lap: int
     gen: int  # jump generation: after a jump the message no longer belongs to the race shown
     logged: bool  # the call record went to the log file, so its radio record goes too
+
+
+class _Busy(Exception):
+    """The loop's lock was not free in time for a viewer's request."""
 
 
 @dataclass
@@ -156,6 +168,9 @@ class PitWallRuntime:
         self.sim_lock = threading.RLock()  # the loop applies an event under it; questions copy the state under it
         self._seek: dict | None = None  # a jump in progress: {target, from_lap, lap}; read by replay_status
         self._seek_cancel = threading.Event()
+        self.state_lock = threading.Lock()  # held only while an event changes the state: readers of the state alone
+        # (the analysis panels) wait for one event, never for the engineers' decision
+        self._start_lock = threading.Lock()  # a jump after the end restarts the loop: once, whoever asks
         self._ask_gate = threading.Lock()  # one question (simulation) at a time; held outside sim_lock
         self._frozen: _Frozen | None = None
         self._gen = 0  # bumped by every jump
@@ -184,6 +199,7 @@ class PitWallRuntime:
         self.n_snapshots = 0
         self.observe_errors = 0
         self.snapshot_errors = 0
+        self.event_errors = 0  # events whose handling raised (skipped; the run goes on)
         self.snap_ms: deque = deque(maxlen=SNAP_MS_KEEP)
         self._decided_t: float | None = None  # session time and leader lap of the last decision
         self._decided_lap = -1
@@ -220,6 +236,9 @@ class PitWallRuntime:
         self._want_index = index
         self._helpers_started = False
         self._indexer_rt: "PitWallRuntime | None" = None
+        self._player: "PitWallRuntime | None" = None  # the indexing pass: the replay it prepares jumps for
+        self._slice_t0 = 0.0
+        self.index_leaps = 0  # the indexing pass: times it carried on from the replay's own checkpoint
         self.replay_index = replay_index
         if self.replay_index is None and getattr(source, "seekable", False):
             self.replay_index = _replay.ReplayIndex(checkpoint_every)
@@ -289,6 +308,8 @@ class PitWallRuntime:
 
     def stop(self) -> None:
         self.stop_event.set()
+        if self._indexer_rt is not None:
+            self._indexer_rt.stop_event.set()
         if self.thread is not None:
             self.thread.join(timeout=10)
         with self._voice_cv:  # messages still waiting are dropped; one being written is not logged after close
@@ -315,16 +336,22 @@ class PitWallRuntime:
         try:
             self.status = "running"
             self._start_helpers()
+            self._slice_t0 = time.perf_counter()
             for e in self.source.events(self.stop_event):
                 if isinstance(e, _replay.Control):
                     self._control(e)
                     continue
                 if self.wall is None:
                     self._ensure_wall()
+                if self._player is not None and self._index_pace():
+                    continue  # moved on to the replay's own checkpoint: this event is behind it
                 self.handle(e)
             if self.wall is not None:
                 with self.sim_lock:
-                    self.publish(force=True)
+                    try:
+                        self.publish(force=True)
+                    except Exception:
+                        log.exception("final snapshot failed")
             self.status = "stopped" if self.stop_event.is_set() else "finished"
         except Exception as exc:
             log.exception("pit wall loop failed")
@@ -345,6 +372,8 @@ class PitWallRuntime:
             lap = self.state.current_lap
             if lap != self._prev_lap:
                 prev, self._prev_lap = self._prev_lap, lap
+                if self.wall is not None:
+                    _replay.trim_memo(self.wall)  # before the checkpoint: it then holds none of the old lap's
                 ix = self.replay_index
                 if ix is not None and self.wall is not None and ix.wanted(lap, prev) \
                         and (self._is_indexer or self.n_events not in ix.checkpoints):  # the indexing pass saved it already
@@ -352,27 +381,34 @@ class PitWallRuntime:
 
     def _handle(self, e: _events.Event) -> None:
         state = self.state
-        state.apply(e)
-        self.n_events += 1
+        self.n_events += 1  # counted even if the frame is bad: it is the event's index for jumps
         self.last_event_wall = time.time()
-        if e.topic == "SessionInfo" and isinstance(e.data, dict):
-            _merge(self.session_info, e.data)
-            if self.wall is not None and not self._wall_quali and self._is_quali():
-                self._build_wall()  # a recording whose first message names the session
-            self._feed_radio(e)
-        if e.topic in FEED_TOPICS:  # feeds never change the timing state: no engineers, no snapshot
-            if e.topic == "TeamRadio":
-                self._note_radio_laps()
+        try:
+            with self.state_lock:
+                state.apply(e)
+                if e.topic == "TimingData":
+                    if not self._feed_positions and feed_has_positions(e.data):
+                        self._feed_positions, self.inferred_order = True, False
+                    if not self._feed_positions and state.drivers and state.started:
+                        self.inferred_order = True
+                        infer_positions(state)
+            if e.topic == "SessionInfo" and isinstance(e.data, dict):
+                _merge(self.session_info, e.data)
+                if self.wall is not None and not self._wall_quali and self._is_quali():
+                    self._build_wall()  # a recording whose first message names the session
                 self._feed_radio(e)
-            if e.topic == "Position.z":
-                self._maybe_push_positions()
+            if e.topic in FEED_TOPICS:  # feeds never change the timing state: no engineers, no snapshot
+                if e.topic == "TeamRadio":
+                    self._note_radio_laps()
+                    self._feed_radio(e)
+                if e.topic == "Position.z":
+                    self._maybe_push_positions()
+                return
+        except Exception:  # one bad frame never ends the run
+            self.event_errors += 1
+            if self.event_errors <= 3:
+                log.exception("event %s failed at t=%.1f; skipped", e.topic, e.t)
             return
-        if e.topic == "TimingData":
-            if not self._feed_positions and feed_has_positions(e.data):
-                self._feed_positions, self.inferred_order = True, False
-            if not self._feed_positions and state.drivers and state.started:
-                self.inferred_order = True
-                infer_positions(state)
         try:
             self.wall.observe(state)
         except Exception:
@@ -381,7 +417,12 @@ class PitWallRuntime:
                 log.exception("engineer observe failed at t=%.1f", state.t)
         lap_changed = state.current_lap != self._decided_lap
         if lap_changed or self._decided_t is None or state.t - self._decided_t >= self.decide_every_s:
-            self._tick(lap_changed)
+            try:
+                self._tick(lap_changed)
+            except Exception:  # building or sending the snapshot failed: the next tick tries again
+                self.snapshot_errors += 1
+                if self.snapshot_errors <= 3:
+                    log.exception("publishing failed at t=%.1f", state.t)
 
     # --------------------------------------------------------------- replay lab
     def _ensure_wall(self) -> None:
@@ -416,7 +457,33 @@ class PitWallRuntime:
             self._indexer_rt = PitWallRuntime(sub, team=self.team, models=self.use_models, history=self.history,
                                               publish_every_s=self.publish_every_s, engineers=self.engineers,
                                               replay_index=ix, indexer=True, coarse=self.coarse)
+            self._indexer_rt._player = self
             self._indexer_rt.start()
+
+    def _index_pace(self) -> bool:
+        """The indexing pass gives way to the replay it works for: they share one interpreter lock, and at 20x or
+        more it halved the replay's pace while barely staying a lap ahead. Every ``INDEX_SLICE_S`` of work it waits
+        while the replay plays faster than ``INDEX_YIELD_ABOVE`` or a question is being answered, then carries on
+        from the replay's newest checkpoint if that is ahead of it (the copy a jump restores: the same as playing
+        on). True if it moved on (the event in hand is then behind it)."""
+        if time.perf_counter() - self._slice_t0 < INDEX_SLICE_S:
+            return False
+        ix, p = self.replay_index, self._player
+        while not self.stop_event.is_set() and (p._ask_gate.locked() or (
+                p.thread is not None and p.thread.is_alive() and not getattr(p.source, "paused", False)
+                and not 0 < p.source.speed <= INDEX_YIELD_ABOVE)):
+            self.stop_event.wait(0.2)
+        ck = ix.latest()
+        moved = ck is not None and ck.idx > self.n_events and ck.payload is not None and not self.stop_event.is_set()
+        if moved:
+            with self.sim_lock:
+                _replay.restore(self, ck.payload)
+                self._prev_lap = self.state.current_lap
+                ix.indexed_idx, ix.indexed_lap = max(ix.indexed_idx, ck.idx), max(ix.indexed_lap, ck.lap)
+            self.source.jump(self.n_events)
+            self.index_leaps += 1
+        self._slice_t0 = time.perf_counter()
+        return moved
 
     def _control(self, ctl: "_replay.Control") -> None:
         ctl.taken = True
@@ -555,15 +622,16 @@ class PitWallRuntime:
             lap = m["lap"]
         try:
             lap = int(lap)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return {"ok": False, "error": "give {lap: N} or {mark: id}"}
         if lap < 0 or lap > 1000:
             return {"ok": False, "error": "lap out of range"}
-        if self._seek is not None:
-            return {"ok": False, "error": "a jump is already running"}
         ctl = _replay.Control("seek", lap=lap)
         alive = self.thread is not None and self.thread.is_alive()
-        self._seek = {"target": lap, "from_lap": self.state.current_lap, "lap": self.state.current_lap}
+        with self._start_lock:  # blocking jumps queue behind each other; a background one refuses to stack
+            if self._seek is not None and not wait:
+                return {"ok": False, "error": "a jump is already running"}
+            self._seek = {"target": lap, "from_lap": self.state.current_lap, "lap": self.state.current_lap}
         if alive and not wait:
             self.source.request(ctl)
             return {"ok": True, "started": True, "target": lap}
@@ -581,8 +649,9 @@ class PitWallRuntime:
                     return {"ok": False, "error": "jump timed out"}
         if not ctl.done.is_set():
             self._control(ctl)
-            if self.thread is not None and not self.thread.is_alive() and not self.stop_event.is_set():
-                self.start()  # a finished replay plays on from the new place
+            with self._start_lock:  # two jumps at once after the end must not start two loops on one source
+                if self.thread is not None and not self.thread.is_alive() and not self.stop_event.is_set():
+                    self.start()  # a finished replay plays on from the new place
         return ctl.result or {"ok": False, "error": "jump failed"}
 
     def replay_cancel(self) -> dict:
@@ -937,7 +1006,10 @@ class PitWallRuntime:
             if text:
                 self.voice_stats["done"] += 1
                 self.voice_stats["last_ms"] = round((time.perf_counter() - t0) * 1000)
-                self._voice_done(job, text)
+                try:
+                    self._voice_done(job, text)
+                except Exception:  # this message is lost; the voice goes on with the next
+                    log.exception("radio message for car %s failed", job.call.car)
 
     def _say(self, job: _VoiceJob) -> str | None:
         """The voice's radio message for a waiting call (None if the voice is off or fails)."""
@@ -1060,6 +1132,7 @@ class PitWallRuntime:
             "inferred_order": self.inferred_order, "model": self.model_info,
             "viewers": len(self.listeners),
             "observe_errors": self.observe_errors, "snapshot_errors": self.snapshot_errors,
+            "event_errors": self.event_errors, "bad_frames": getattr(self.state, "bad_frames", 0),
             "snapshot_ms_p50": round(ms[len(ms) // 2], 2) if ms else None,
             "snapshot_ms_max": round(ms[-1], 2) if ms else None,
             "call_log": str(self.log_path) if self.log_path else None,
@@ -1115,12 +1188,25 @@ class PitWallRuntime:
             self.voice = Voice()
         return self.voice
 
+    @contextlib.contextmanager
+    def _sim(self, timeout: float | None = None):
+        """The loop's lock for a viewer's request; ``_Busy`` after ``timeout`` (a jump far ahead holds it for long)."""
+        if not self.sim_lock.acquire(timeout=ASK_WAIT_S if timeout is None else timeout):
+            raise _Busy
+        try:
+            yield
+        finally:
+            self.sim_lock.release()
+
     def _push_wall(self, **m) -> dict:
-        with self.sim_lock:
-            self._wall_id += 1
-            m = {"id": self._wall_id, "t": round(self.state.t, 1), "lap": self.state.current_lap, "ask": True, **m}
-            self.wall_msgs.append(m)
-            return m
+        try:
+            with self._sim():
+                self._wall_id += 1
+                m = {"id": self._wall_id, "t": round(self.state.t, 1), "lap": self.state.current_lap, "ask": True, **m}
+                self.wall_msgs.append(m)
+                return m
+        except _Busy:  # answered all the same, but not added to the conversation
+            return {"id": None, "t": None, "lap": None, "ask": True, **m}
 
     def _freeze(self) -> _Frozen:
         """A private copy of the state and the engineers as of now, for questions (call under sim_lock).
@@ -1150,8 +1236,8 @@ class PitWallRuntime:
         return f
 
     @staticmethod
-    def _busy(why: str = "the pit wall is answering another question: try again in a moment") -> dict:
-        return {"ok": False, "busy": True, "error": why}
+    def _busy(why: str = "answering another question") -> dict:
+        return {"ok": False, "busy": True, "error": f"the pit wall is {why}: try again in a moment"}
 
     def ask(self, car: str | None, text: str, *, source: str = "text") -> dict:
         """Answer a question about ``car`` as of now: a what-if on the simulator, or a fact through the voice.
@@ -1168,12 +1254,12 @@ class PitWallRuntime:
             return {"ok": False, "error": "empty question"}
         t0 = time.perf_counter()
         if self._seek is not None:
-            return self._busy("the pit wall is jumping to another lap: try again when it has arrived")
+            return self._busy("jumping to another lap")
         if not self._ask_gate.acquire(timeout=ASK_WAIT_S):
             return self._busy()
         res = snap = None
         try:
-            with self.sim_lock:  # only the copy is made under the loop's lock
+            with self._sim():  # only the copy is made under the loop's lock
                 state = self.state
                 if self.wall is None or self._wall_quali or not state.drivers:
                     return {"ok": False, "error": "the pit wall has no race data yet"}
@@ -1194,6 +1280,8 @@ class PitWallRuntime:
                 snap = f.snap
                 call = next((c for c in snap.calls if c.car == car), None) or Call(snap.t, car, "NO_CALL")
                 nb = {"ahead": snap.cars.get(car, {}).get("rivals__ahead"), "behind": snap.cars.get(car, {}).get("rivals__behind")}
+        except _Busy:
+            return self._busy("moving the replay")
         finally:
             self._ask_gate.release()
         you = self._push_wall(kind="you", car=car, text=text, source=source)
@@ -1270,15 +1358,15 @@ class PitWallRuntime:
             return {"ok": False, "error": f"compound must be one of {', '.join(DRY + wi.WET)}"}
         try:
             lap = int(stop_lap)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):  # OverflowError: 1e400 parses as inf
             return {"ok": False, "error": "stop lap must be a whole number"}
         t0 = time.perf_counter()
         if self._seek is not None:
-            return self._busy("the pit wall is jumping to another lap: try again when it has arrived")
+            return self._busy("jumping to another lap")
         if not self._ask_gate.acquire(timeout=ASK_WAIT_S):
             return self._busy()
         try:
-            with self.sim_lock:  # only the copy is made under the loop's lock
+            with self._sim():  # only the copy is made under the loop's lock
                 state = self.state
                 if self.wall is None or self._wall_quali or not state.drivers:
                     return {"ok": False, "error": "the pit wall has no race data yet"}
@@ -1288,6 +1376,8 @@ class PitWallRuntime:
                 f = self._freeze()
             q = wi.Question(f"stop on lap {lap}", "whatif", (wi.Spec("lap", lap=lap, compound=comp),))
             r = wi.what_if(f.wall, f.state, car, q)
+        except _Busy:
+            return self._busy("moving the replay")
         finally:
             self._ask_gate.release()
         if not r.get("ok"):
@@ -1317,7 +1407,9 @@ class PitWallRuntime:
         lap, ref_lap = as_lap(lap), as_lap(ref_lap)
         if -1 in (lap, ref_lap):
             return {"ok": False, "error": "lap must be a whole number"}
-        with self.sim_lock:
+        if kind not in ("deg", "evolution", "laps", "compare", "trace", "coach"):
+            return {"ok": False, "error": self.ANALYSIS_KINDS}
+        with self.state_lock:  # the state alone, as of now: never waits for the engineers' decision
             st = self.state
             if car is not None and car not in st.drivers or other not in (None, "") and other not in st.drivers:
                 return {"ok": False, "error": "unknown car"}
@@ -1340,7 +1432,9 @@ class PitWallRuntime:
                 if a is None or b is None:
                     return {"ok": False, "error": "no telemetry for one of the laps (the feeds keep about ten minutes)"}
                 return {"ok": True, "kind": kind, **C.compare(a, b)}
-        return {"ok": False, "error": "kind must be deg, evolution, laps (car[, other]), compare (car, other), trace (car, lap) or coach (car, lap)"}
+        return {"ok": False, "error": self.ANALYSIS_KINDS}
+
+    ANALYSIS_KINDS = "kind must be deg, evolution, laps (car[, other]), compare (car, other), trace (car, lap) or coach (car, lap)"
 
     def set_risk(self, risk) -> dict:
         """How the strategy ranks plans from now on (expected | protect | aggressive); the next decision replans."""
@@ -1349,10 +1443,13 @@ class PitWallRuntime:
         risk = str(risk or "").lower()
         if risk not in ("expected", "protect", "aggressive"):
             return {"ok": False, "error": "risk must be expected, protect or aggressive"}
-        with self.sim_lock:
-            self.team = dataclasses.replace(self.team, risk=risk)
-            if self.wall is not None:
-                self.wall.ctx.team = self.team
+        try:
+            with self._sim():
+                self.team = dataclasses.replace(self.team, risk=risk)
+                if self.wall is not None:
+                    self.wall.ctx.team = self.team
+        except _Busy:
+            return self._busy("moving the replay")
         return {"ok": True, "risk": risk}
 
     def ack(self, car, decision, reason: str | None = None, call_t=None) -> dict:
@@ -1362,19 +1459,20 @@ class PitWallRuntime:
         if decision not in ("accept", "reject"):
             return {"ok": False, "error": "decision must be accept or reject"}
         car, reason = str(car or ""), " ".join(str(reason or "").split())[:200]
-        with self.sim_lock:
-            calls = [r for r in self.calls_log if r.get("kind") == "call" and r.get("car") == car and r.get("action") != "NO_CALL"]
-            if call_t is not None:
-                try:
-                    calls = [r for r in calls if abs(float(r["t"]) - float(call_t)) < 1e-3]
-                except (TypeError, ValueError):
-                    return {"ok": False, "error": "call_t must be a number"}
-            if not calls:
-                return {"ok": False, "error": f"no call to answer for car {car!r}"}
-            c = calls[-1]
-            rec = {"kind": "ack", "car": car, "call_t": c["t"], "action": c["action"], "compound": c.get("compound"),
-                   "call_lap": c.get("car_lap"), "decision": decision, "reason": reason or None,
-                   "t": round(self.state.t, 1), "lap": self.state.current_lap, "wall": round(time.time(), 3)}
+        logged, state = list(self.calls_log), self.state  # a copy in one step: no wait for the loop's decision
+        calls = [r for r in logged if r.get("kind") == "call" and r.get("car") == car and r.get("action") != "NO_CALL"]
+        if call_t is not None:
+            try:
+                calls = [r for r in calls if abs(float(r["t"]) - float(call_t)) < 1e-3]
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "call_t must be a number"}
+        if not calls:
+            return {"ok": False, "error": f"no call to answer for car {car!r}"}
+        c = calls[-1]
+        rec = {"kind": "ack", "car": car, "call_t": c["t"], "action": c["action"], "compound": c.get("compound"),
+               "call_lap": c.get("car_lap"), "decision": decision, "reason": reason or None,
+               "t": round(state.t, 1), "lap": state.current_lap, "wall": round(time.time(), 3)}
+        with self.lock:
             self.acks_log.append(rec)
             self.acks[car] = rec
         self._write_log(rec)

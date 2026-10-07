@@ -27,17 +27,23 @@ server gets a JSON 500, never a dropped connection; questions are answered one a
 
 Many browsers may watch at once: each SSE client has its own thread and a bounded queue (a slow one loses its oldest
 messages, a stalled one is cut after WRITE_TIMEOUT_S), so the publishing loop never waits for a viewer; the viewer
-cap is checked and taken in one step. With a token
+cap is checked and taken in one step. JSON, pages and the stream go gzip-compressed to clients that accept it (the
+snapshot is compressed once for all; the stream is flushed per event); an idle connection is closed after
+IDLE_TIMEOUT_S. With a token
 set, every request needs it (``?token=``, ``X-PitSense-Token`` or the cookie the first good page load sets).
 """
 
 from __future__ import annotations
 
+import gzip
 import hmac
 import json
 import logging
+import os
 import queue
+import socket
 import threading
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -48,6 +54,9 @@ TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=u
          ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
 MAX_BODY = 8_000_000  # bytes: a question is a sentence; a recording a few seconds of opus
 WRITE_TIMEOUT_S = 8.0  # a viewer that accepts no data for this long is dropped
+IDLE_TIMEOUT_S = 120.0  # an open connection with no request (or a body that stops coming) is closed after this long
+GZIP_MIN = 1024  # JSON and event streams this big or bigger go gzip-compressed to browsers that accept it (~8x smaller)
+GZIP_LEVEL = 5
 MAX_VIEWERS = 64
 COOKIE = "pitsense_token"
 REPLAY_POSTS = ("/api/replay/pause", "/api/replay/resume", "/api/replay/speed", "/api/replay/seek", "/api/replay/cancel")
@@ -55,9 +64,13 @@ PAGES = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/
 
 
 def _handler(rt, token: str | None = None, max_viewers: int = MAX_VIEWERS):
+    snap_gz: list = [None, None]  # (snapshot bytes, their gzip)
+    snap_gz_lock = threading.Lock()
+
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = "PitSense"
+        timeout = IDLE_TIMEOUT_S  # a kept-alive connection that sends nothing frees its thread
 
         def log_message(self, *args) -> None:  # quiet
             pass
@@ -81,16 +94,36 @@ def _handler(rt, token: str | None = None, max_viewers: int = MAX_VIEWERS):
         def _deny(self) -> None:
             self._send(b'{"error":"token required: open the URL with ?token=..."}', "application/json", 401)
 
-        def _send(self, body: bytes, ctype: str, code: int = 200) -> None:
+        def _gzip_ok(self) -> bool:
+            return "gzip" in self.headers.get("Accept-Encoding", "")
+
+        def _send(self, body: bytes, ctype: str, code: int = 200, gz: bytes | None = None) -> None:
+            """``gz``: the body already compressed (the snapshot, compressed once for every viewer)."""
             self._responded = True
+            zipped = self._gzip_ok() and ctype.startswith(("application/json", "text/")) and len(body) >= GZIP_MIN
+            if zipped:
+                body = gz or gzip.compress(body, GZIP_LEVEL)
             self.send_response(code)
             if getattr(self, "_set_cookie", False):
                 self.send_header("Set-Cookie", f"{COOKIE}={token}; Path=/; SameSite=Strict; HttpOnly")
             self.send_header("Content-Type", ctype)
+            if zipped:
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
+
+        def _snapshot(self) -> None:
+            body = rt.latest_bytes
+            gz = None
+            if self._gzip_ok() and len(body) >= GZIP_MIN:
+                with snap_gz_lock:  # one compression per snapshot, however many viewers poll it
+                    if snap_gz[0] is not body:
+                        snap_gz[:] = [body, gzip.compress(body, GZIP_LEVEL)]
+                    gz = snap_gz[1]
+            self._send(body, "application/json", gz=gz)
 
         def _json(self, obj, code: int = 200) -> None:
             self._send(json.dumps(obj, separators=(",", ":"), default=str).encode(), "application/json", code)
@@ -195,7 +228,7 @@ def _handler(rt, token: str | None = None, max_viewers: int = MAX_VIEWERS):
                         out = rt.set_risk(json.loads(body.decode("utf-8") or "{}").get("risk"))
                     except (ValueError, AttributeError):
                         return self._json({"ok": False, "error": "body must be JSON: {risk}"}, 400)
-                    return self._json(out, 200 if out.get("ok") else 422)
+                    return self._json(out, 200 if out.get("ok") else 503 if out.get("busy") else 422)
                 if path == "/api/ack":
                     try:
                         req = json.loads(body.decode("utf-8") or "{}")
@@ -236,7 +269,7 @@ def _handler(rt, token: str | None = None, max_viewers: int = MAX_VIEWERS):
                     f = STATIC / PAGES[path]
                     self._send(f.read_bytes(), TYPES[f.suffix])
                 elif path == "/api/snapshot":
-                    self._send(rt.latest_bytes, "application/json")
+                    self._snapshot()
                 elif path == "/api/calls":
                     self._json(rt.calls())
                 elif path == "/api/alerts":
@@ -271,14 +304,21 @@ def _handler(rt, token: str | None = None, max_viewers: int = MAX_VIEWERS):
             try:
                 self.connection.settimeout(WRITE_TIMEOUT_S)  # a write that blocks this long means the client is gone or stuck
                 self._responded = True
+                z = zlib.compressobj(GZIP_LEVEL, zlib.DEFLATED, 31) if self._gzip_ok() else None  # 31: gzip framing
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-store")
+                if z is not None:
+                    self.send_header("Content-Encoding", "gzip")
                 self.send_header("Connection", "close")
                 self.end_headers()
                 self.close_connection = True
-                self.wfile.write(b"retry: 2000\nevent: snapshot\ndata: " + rt.latest_bytes + b"\n\n")
-                self.wfile.flush()
+
+                def write(b: bytes) -> None:  # each event goes out whole (a sync flush ends every compressed chunk)
+                    self.wfile.write(b if z is None else z.compress(b) + z.flush(zlib.Z_SYNC_FLUSH))
+                    self.wfile.flush()
+
+                write(b"retry: 2000\nevent: snapshot\ndata: " + rt.latest_bytes + b"\n\n")
                 idle = 0
                 while not rt.stop_event.is_set():
                     try:
@@ -286,16 +326,14 @@ def _handler(rt, token: str | None = None, max_viewers: int = MAX_VIEWERS):
                     except queue.Empty:
                         idle += 1
                         if idle >= 10:  # keep-alive comment every ~10 s
-                            self.wfile.write(b": keep-alive\n\n")
-                            self.wfile.flush()
+                            write(b": keep-alive\n\n")
                             idle = 0
                         continue
                     idle = 0
                     if msg["event"] in ("snapshot", "pos"):
-                        self.wfile.write(b"event: " + msg["event"].encode() + b"\ndata: " + msg["data"] + b"\n\n")
+                        write(b"event: " + msg["event"].encode() + b"\ndata: " + msg["data"] + b"\n\n")
                     else:
-                        self.wfile.write(b"event: status\ndata: " + json.dumps(msg).encode() + b"\n\n")
-                    self.wfile.flush()
+                        write(b"event: status\ndata: " + json.dumps(msg).encode() + b"\n\n")
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
                 pass
             finally:
@@ -306,7 +344,12 @@ def _handler(rt, token: str | None = None, max_viewers: int = MAX_VIEWERS):
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = True
+    allow_reuse_address = os.name != "nt"  # on Windows SO_REUSEADDR lets a second pit wall bind the same port
+
+    def server_bind(self) -> None:
+        if os.name == "nt":  # ... and the browser then talks to either: the port is ours alone, or bind fails
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 def serve(rt, host: str = "127.0.0.1", port: int = 8765, token: str | None = None,

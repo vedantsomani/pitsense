@@ -217,6 +217,7 @@ class RaceState:
         self._plt_seen: set[tuple[str, str]] = set()
         self._has_pit_series = False
         self.feeds = Feeds(self.meta)  # not part of view() or fingerprint()
+        self.bad_frames = 0  # frames dropped as malformed (corrupt .z payload, a timing topic that is not an object)
 
     # ------------------------------------------------------------------ public
     @property
@@ -236,14 +237,20 @@ class RaceState:
         self.new_laps = []
         self.feeds.advance(e.t)
         if e.topic in FEED_TOPICS:  # telemetry, positions, radio: kept apart from the timing state
-            self.feeds.apply(e)
+            try:
+                self.feeds.apply(e)
+            except Exception:  # a truncated or corrupt frame (bad base64 / deflate, wrong shape) is dropped
+                self.bad_frames += 1
+            return
+        if not isinstance(e.data, dict):  # every timing topic is an object: merging anything else poisons the topic
+            self.bad_frames += 1
             return
         if e.kind == "snapshot":
             self.topics[e.topic] = clone(e.data)
         else:
             self.topics[e.topic] = deep_merge(self.topics.get(e.topic), e.data)
         handler = getattr(self, f"_on_{e.topic.replace('.', '_')}", None)
-        if handler is not None and isinstance(e.data, dict):
+        if handler is not None:
             handler(e.data, e)
 
     def running_order(self) -> list[DriverState]:
