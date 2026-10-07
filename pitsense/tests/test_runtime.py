@@ -574,6 +574,43 @@ def test_panels_and_answers_never_wait_for_the_decision():
     assert out["deg"]["ok"] and out["ack"]["ok"]
 
 
+def test_questions_say_busy_instead_of_hanging_behind_a_long_jump(monkeypatch):
+    """A jump far ahead holds the loop's lock for as long as it replays: a question then gets "busy", not a hang."""
+    rt = run_replay()
+    monkeypatch.setattr(runtime_mod, "ASK_WAIT_S", 0.1)
+    held, release = threading.Event(), threading.Event()
+
+    def jump():
+        with rt.sim_lock:
+            held.set()
+            release.wait(10)
+
+    th = threading.Thread(target=jump)
+    th.start()
+    try:
+        assert held.wait(5)
+        for out in (rt.whatif("22", 7, "HARD"), rt.ask("22", "what if we box now"), rt.set_risk("protect")):
+            assert out["ok"] is False and out["busy"] and "moving the replay" in out["error"]
+    finally:
+        release.set()
+        th.join(5)
+    assert rt.set_risk("protect")["ok"]
+
+
+def test_a_second_pit_wall_cannot_take_the_same_port():
+    """On Windows SO_REUSEADDR let a second server bind a port in use, and the browser then talked to either."""
+    import pytest
+
+    rt = run_replay()
+    server = serve(rt, port=0)
+    try:
+        with pytest.raises(OSError):
+            serve(rt, port=server.server_address[1])
+    finally:
+        server.shutdown()
+        rt.stop()
+
+
 def test_server_compresses_for_browsers_that_accept_it():
     import gzip
     import zlib

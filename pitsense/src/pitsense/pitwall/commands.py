@@ -158,8 +158,12 @@ def cmd_pitwall(a) -> None:
     log_dir = Path(a.log_dir) if a.log_dir else data_dir() / "pitwall"
     rt = PitWallRuntime(src, team=_team_config(a.team, a.risk), log_dir=log_dir, models=not a.no_models, coarse=a.coarse,
                         index=getattr(src, "seekable", False))  # a replay: prepare every lap in the background so jumps are instant
+    try:
+        server = serve(rt, host=a.host, port=a.port, token=a.token)
+    except OSError as exc:
+        raise SystemExit(f"cannot serve on {a.host}:{a.port} ({exc.strerror or exc}): is another pit wall running? "
+                         "--port 0 picks a free port") from None
     rt.start()
-    server = serve(rt, host=a.host, port=a.port, token=a.token)
     port = server.server_address[1]
     q = f"?token={a.token}" if a.token else ""
     url = f"http://{'127.0.0.1' if a.host in ('0.0.0.0', '') else server.server_address[0]}:{port}/{q}"

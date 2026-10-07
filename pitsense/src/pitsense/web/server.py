@@ -39,7 +39,9 @@ import gzip
 import hmac
 import json
 import logging
+import os
 import queue
+import socket
 import threading
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -224,7 +226,7 @@ def _handler(rt, token: str | None = None, max_viewers: int = MAX_VIEWERS):
                         out = rt.set_risk(json.loads(body.decode("utf-8") or "{}").get("risk"))
                     except (ValueError, AttributeError):
                         return self._json({"ok": False, "error": "body must be JSON: {risk}"}, 400)
-                    return self._json(out, 200 if out.get("ok") else 422)
+                    return self._json(out, 200 if out.get("ok") else 503 if out.get("busy") else 422)
                 if path == "/api/ack":
                     try:
                         req = json.loads(body.decode("utf-8") or "{}")
@@ -340,7 +342,12 @@ def _handler(rt, token: str | None = None, max_viewers: int = MAX_VIEWERS):
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = True
+    allow_reuse_address = os.name != "nt"  # on Windows SO_REUSEADDR lets a second pit wall bind the same port
+
+    def server_bind(self) -> None:
+        if os.name == "nt":  # ... and the browser then talks to either: the port is ours alone, or bind fails
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 def serve(rt, host: str = "127.0.0.1", port: int = 8765, token: str | None = None,

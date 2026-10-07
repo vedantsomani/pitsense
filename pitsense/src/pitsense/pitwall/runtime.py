@@ -28,6 +28,7 @@ Around it: ``sources.py`` (replay, follow, live), ``shadow.py`` (scoring a call 
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
 import logging
@@ -121,6 +122,10 @@ class _VoiceJob:
     lap: int
     gen: int  # jump generation: after a jump the message no longer belongs to the race shown
     logged: bool  # the call record went to the log file, so its radio record goes too
+
+
+class _Busy(Exception):
+    """The loop's lock was not free in time for a viewer's request."""
 
 
 @dataclass
@@ -1152,12 +1157,25 @@ class PitWallRuntime:
             self.voice = Voice()
         return self.voice
 
+    @contextlib.contextmanager
+    def _sim(self, timeout: float | None = None):
+        """The loop's lock for a viewer's request; ``_Busy`` after ``timeout`` (a jump far ahead holds it for long)."""
+        if not self.sim_lock.acquire(timeout=ASK_WAIT_S if timeout is None else timeout):
+            raise _Busy
+        try:
+            yield
+        finally:
+            self.sim_lock.release()
+
     def _push_wall(self, **m) -> dict:
-        with self.sim_lock:
-            self._wall_id += 1
-            m = {"id": self._wall_id, "t": round(self.state.t, 1), "lap": self.state.current_lap, "ask": True, **m}
-            self.wall_msgs.append(m)
-            return m
+        try:
+            with self._sim():
+                self._wall_id += 1
+                m = {"id": self._wall_id, "t": round(self.state.t, 1), "lap": self.state.current_lap, "ask": True, **m}
+                self.wall_msgs.append(m)
+                return m
+        except _Busy:  # answered all the same, but not added to the conversation
+            return {"id": None, "t": None, "lap": None, "ask": True, **m}
 
     def _freeze(self) -> _Frozen:
         """A private copy of the state and the engineers as of now, for questions (call under sim_lock).
@@ -1187,8 +1205,8 @@ class PitWallRuntime:
         return f
 
     @staticmethod
-    def _busy() -> dict:
-        return {"ok": False, "busy": True, "error": "the pit wall is answering another question: try again in a moment"}
+    def _busy(why: str = "answering another question") -> dict:
+        return {"ok": False, "busy": True, "error": f"the pit wall is {why}: try again in a moment"}
 
     def ask(self, car: str | None, text: str, *, source: str = "text") -> dict:
         """Answer a question about ``car`` as of now: a what-if on the simulator, or a fact through the voice.
@@ -1208,7 +1226,7 @@ class PitWallRuntime:
             return self._busy()
         res = snap = None
         try:
-            with self.sim_lock:  # only the copy is made under the loop's lock
+            with self._sim():  # only the copy is made under the loop's lock
                 state = self.state
                 if self.wall is None or self._wall_quali or not state.drivers:
                     return {"ok": False, "error": "the pit wall has no race data yet"}
@@ -1229,6 +1247,8 @@ class PitWallRuntime:
                 snap = f.snap
                 call = next((c for c in snap.calls if c.car == car), None) or Call(snap.t, car, "NO_CALL")
                 nb = {"ahead": snap.cars.get(car, {}).get("rivals__ahead"), "behind": snap.cars.get(car, {}).get("rivals__behind")}
+        except _Busy:
+            return self._busy("moving the replay")
         finally:
             self._ask_gate.release()
         you = self._push_wall(kind="you", car=car, text=text, source=source)
@@ -1311,7 +1331,7 @@ class PitWallRuntime:
         if not self._ask_gate.acquire(timeout=ASK_WAIT_S):
             return self._busy()
         try:
-            with self.sim_lock:  # only the copy is made under the loop's lock
+            with self._sim():  # only the copy is made under the loop's lock
                 state = self.state
                 if self.wall is None or self._wall_quali or not state.drivers:
                     return {"ok": False, "error": "the pit wall has no race data yet"}
@@ -1321,6 +1341,8 @@ class PitWallRuntime:
                 f = self._freeze()
             q = wi.Question(f"stop on lap {lap}", "whatif", (wi.Spec("lap", lap=lap, compound=comp),))
             r = wi.what_if(f.wall, f.state, car, q)
+        except _Busy:
+            return self._busy("moving the replay")
         finally:
             self._ask_gate.release()
         if not r.get("ok"):
@@ -1384,10 +1406,13 @@ class PitWallRuntime:
         risk = str(risk or "").lower()
         if risk not in ("expected", "protect", "aggressive"):
             return {"ok": False, "error": "risk must be expected, protect or aggressive"}
-        with self.sim_lock:
-            self.team = dataclasses.replace(self.team, risk=risk)
-            if self.wall is not None:
-                self.wall.ctx.team = self.team
+        try:
+            with self._sim():
+                self.team = dataclasses.replace(self.team, risk=risk)
+                if self.wall is not None:
+                    self.wall.ctx.team = self.team
+        except _Busy:
+            return self._busy("moving the replay")
         return {"ok": True, "risk": risk}
 
     def ack(self, car, decision, reason: str | None = None, call_t=None) -> dict:
