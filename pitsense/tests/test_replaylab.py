@@ -272,3 +272,19 @@ def test_seek_to_lap_zero_is_the_start_of_the_race():
     rt = play_all(runtime())
     res = rt.replay_seek(0)
     assert res["ok"] and res["events"] == 0 and rt.state.current_lap == 0 and rt.latest is None
+
+
+def test_indexing_pass_carries_on_from_the_replays_own_checkpoint(monkeypatch):
+    """Behind the replay the indexing pass would only redo its work: it restores the replay's newest checkpoint and
+    plays on from there, ending exactly where a straight play ends."""
+    from pitsense.pitwall import runtime as runtime_mod
+
+    monkeypatch.setattr(runtime_mod, "INDEX_SLICE_S", 0.0)
+    player = play_all(runtime())  # it saved every lap itself
+    ix = player.replay_index
+    sub = PitWallRuntime(ReplaySource(make_log(), 0), models=False, replay_index=ix, indexer=True)
+    sub._player = player
+    sub.start()
+    assert sub.wait(60) and ix.done
+    assert sub.index_leaps >= 1 and sub.state.current_lap == 9
+    assert view(sub) == view(player)

@@ -513,3 +513,89 @@ def test_analysis_api_answers_each_panel_or_says_why_not():
     assert rt.analysis("trace", "22", lap=3)["ok"] is False  # the synthetic race has no telemetry
     assert rt.analysis("coach", "22", lap="x")["ok"] is False and rt.analysis("nope")["ok"] is False
     assert rt.analysis("deg", "99")["error"] == "unknown car"
+
+
+def test_a_bad_frame_never_ends_the_run():
+    """Truncated / corrupt feed frames and timing topics that are not objects are dropped; the race plays on."""
+    from .conftest import synthetic_events
+
+    good = synthetic_events()
+    t = good[len(good) // 2][0]
+    bad = [(t, "CarData.z", "x"), (t, "Position.z", {"Position": [None]}), (t, "TeamRadio", {"Captures": [None]}),
+           (t, "DriverList", []), (t, "TimingAppData", [1]), (t, "TimingData", "garbage")]
+    clean, rt = run_replay(), run_replay(make_log(good + bad))
+    assert rt.status == "finished" and rt.error is None
+    assert rt.state.bad_frames == len(bad) and rt.health()["bad_frames"] == len(bad)
+    assert rt.state.fingerprint() == clean.state.fingerprint()  # nothing of the bad frames got in
+    assert [c["action"] for c in rt.calls()["log"]] == [c["action"] for c in clean.calls()["log"]]
+
+
+def test_a_failing_publish_never_ends_the_run(monkeypatch):
+    """A NaN in what only viewers see, or a view that raises, costs that snapshot at most, never the loop."""
+    calls = {"n": 0}
+
+    def flaky_charts(state, memory, focus):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("boom")
+        return {"pace": [float("nan"), 1.0]}
+
+    monkeypatch.setattr(runtime_mod.charts, "build", flaky_charts)
+    monkeypatch.setattr(PitWallRuntime, "_championship", lambda self, state: [float("inf")])
+    rt = run_replay()
+    assert rt.status == "finished" and rt.state.current_lap == 9
+    snap = json.loads(rt.latest_bytes)  # strict JSON: NaN / inf went out as null
+    assert snap["extra"]["charts"] == {"pace": [None, 1.0]} and snap["extra"]["championship"] == [None]
+
+    def broken_extra(self, state):
+        raise ValueError("bad view")
+
+    monkeypatch.setattr(PitWallRuntime, "_feed_extra", broken_extra)
+    rt = run_replay()
+    assert rt.status == "finished" and rt.snapshot_errors > 0 and rt.state.current_lap == 9
+
+
+def test_out_of_range_numbers_are_refused_not_500():
+    rt = run_replay()
+    assert rt.whatif("22", float("inf"), "HARD") == {"ok": False, "error": "stop lap must be a whole number"}
+    assert rt.replay_seek(lap=float("inf"))["ok"] is False
+
+
+def test_panels_and_answers_never_wait_for_the_decision():
+    """The analysis panels read the state alone and the operator's answer copies the log: while the loop holds its
+    lock (the engineers deciding) both answer at once."""
+    rt = run_replay()
+    out = {}
+    with rt.sim_lock:
+        th = threading.Thread(target=lambda: out.update(deg=rt.analysis("deg"), ack=rt.ack("22", "accept")))
+        th.start()
+        th.join(2)
+        assert not th.is_alive(), "a panel waited for the loop's decision"
+    assert out["deg"]["ok"] and out["ack"]["ok"]
+
+
+def test_server_compresses_for_browsers_that_accept_it():
+    import gzip
+    import zlib
+
+    rt = run_replay(team=TeamConfig(cars=("22",)))
+    server = serve(rt, port=0)
+    port = server.server_address[1]
+    hdr = {"Accept-Encoding": "gzip, deflate"}
+    try:
+        for _ in range(2):  # the second answer comes from the compressed copy of the same snapshot
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/api/snapshot", headers=hdr)
+            with urllib.request.urlopen(req, timeout=10) as r:
+                assert r.headers["Content-Encoding"] == "gzip"
+                assert gzip.decompress(r.read()) == rt.latest_bytes
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/stream", headers=hdr)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            assert r.headers["Content-Encoding"] == "gzip"
+            text = zlib.decompressobj(31).decompress(r.read1(1 << 20))  # one event is one whole flushed chunk
+            assert text.startswith(b"retry: 2000\nevent: snapshot\ndata: ") and text.endswith(b"\n\n")
+            assert json.loads(text.split(b"data: ", 1)[1]) == json.loads(rt.latest_bytes)
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=10) as r:
+            assert r.headers.get("Content-Encoding") is None  # not asked for: plain
+    finally:
+        server.shutdown()
+        rt.stop()
