@@ -22,7 +22,8 @@ def test_labels_on_the_synthetic_feed(race_log):
     pit = next(r for r in rows if r["kind"] == "pit_entry")
     assert pit["driver"] == "22" and pit["y_fresh_compound"] == "HARD"
     assert math.isnan(pit["y_fresh_lap"])  # its first flying lap is under the safety car
-    assert {"next_lap_time", "lap_time_5", "tyre_cliff_3", "fresh_tyre_pace"} == {t.name for t in tyre_tasks()}
+    assert {"next_lap_time", "lap_time_5", "tyre_cliff_3", "tyre_cliff_1", "tyre_cliff_5", "deg_rate_5",
+            "pace_5_mean", "fresh_tyre_pace"} == {t.name for t in tyre_tasks()}
 
 
 def _race(times: dict[str, list[float]], intervals: dict[str, float] | None = None, stops=()):
