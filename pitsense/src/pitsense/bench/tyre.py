@@ -15,13 +15,20 @@ Labels read the finished race (the future); they are only used to score.
                     lap j in free air (>= 1 s behind the car ahead), so a car held up in
                     traffic or a one-lap mistake doesn't count. 0 needs laps L+1..L+4 clean
                     and on the same set.
+* ``y_cliff_1`` / ``y_cliff_5``  the same over 1 / 5 laps (0 needs laps L+1..L+h+1 clean).
+* ``y_deg_5``       lap-end rows: OLS slope (s/lap) of the car's clean laps L+1..L+5 on the same set after
+                    removing the field's common change (``common``); needs no stop before L+5 and 4+ clean laps.
+* ``y_pace_5``      lap-end rows: mean of the clean laps among L+1..L+5 on the same set (3+ needed).
 * ``y_fresh_lap``   pit-entry rows: time of the first flying lap on the new set (in-lap
                     + 2) if it is clean and the set is new; ``y_fresh_compound`` is the
                     compound fitted (read at the end of that stint, when it is confirmed).
+                    ``fresh_tyre_pace`` asks "if you fit X now?": its rows copy the fitted compound into
+                    ``ask_compound``, the what-if input the models read (never a ``y_*`` column).
 """
 
 from __future__ import annotations
 
+from functools import partial
 from statistics import median
 
 import numpy as np
@@ -30,10 +37,14 @@ from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostin
 
 from ..config import DRY_COMPOUNDS
 from ..state import LapRecord, RaceState
+from .features import feature_columns
+from .hazard import FeatureGBM, num, task
 from .tasks import Task, lap_end_rows
 
 CLIFF_S = 1.0  # sudden loss that counts as falling off, s/lap
-CLIFF_LAPS = 3  # horizon of the cliff label
+CLIFF_LAPS = 3  # horizon of the cliff label (y_cliff_3); y_cliff_1 / y_cliff_5 use 1 / 5
+CLIFF_HORIZONS = (1, 3, 5)
+WINDOW = 5  # laps of the deg / pace labels
 FREE_AIR_S = 1.0  # a lap started closer than this to the car ahead may be held up
 MIN_FIELD = 5  # cars needed to measure the field's common change
 RACING = 1.25  # a green-flag lap slower than this times the race's median clean lap is neutralised, not racing
@@ -98,22 +109,40 @@ class _Race:
         prev = self.laps.get(drv, {}).get(j - 1)
         return prev is None or prev.position == 1 or prev.interval is None or prev.interval >= FREE_AIR_S
 
-    def cliff(self, drv: str, L: int) -> float:
+    def cliff(self, drv: str, L: int, h: int = CLIFF_LAPS) -> float:
         laps = self.laps.get(drv, {})
         r = self.ref(drv, L)
         if r is None:
             return float("nan")
-        flags = []  # per lap L+1..L+CLIFF_LAPS+1: fell off? (None = can't tell)
-        for j in range(L + 1, L + CLIFF_LAPS + 2):
+        flags = []  # per lap L+1..L+h+1: fell off? (None = can't tell)
+        for j in range(L + 1, L + h + 2):
             x = laps.get(j)
             c = self.common(L, j)
             if not self.clean(x) or not self.same_set(drv, L, j) or c is None:
                 break
             flags.append(x.lap_time - r - c >= CLIFF_S and self.free_air(drv, j))
-        for k in range(min(CLIFF_LAPS, len(flags) - 1)):
+        for k in range(min(h, len(flags) - 1)):
             if flags[k] and flags[k + 1]:
                 return 1.0
-        return 0.0 if len(flags) == CLIFF_LAPS + 1 else float("nan")
+        return 0.0 if len(flags) == h + 1 else float("nan")
+
+    def _window(self, drv: str, L: int, h: int) -> list[LapRecord]:
+        """Clean laps among L+1..L+h when no stop ends a lap before L+h (else none)."""
+        laps = self.laps.get(drv, {})
+        if not self.same_set(drv, L, L + h):
+            return []
+        return [laps[j] for j in range(L + 1, L + h + 1) if self.clean(laps.get(j))]
+
+    def deg(self, drv: str, L: int, h: int = WINDOW) -> float:
+        pts = [(x.lap, x.lap_time - c) for x in self._window(drv, L, h) if (c := self.common(L, x.lap)) is not None]
+        if len(pts) < h - 1:
+            return float("nan")
+        j, v = zip(*pts)
+        return float(np.polyfit(j, v, 1)[0])
+
+    def pace(self, drv: str, L: int, h: int = WINDOW) -> float:
+        xs = self._window(drv, L, h)
+        return float(np.mean([x.lap_time for x in xs])) if len(xs) >= 3 else float("nan")
 
     def ahead(self, drv: str, L: int, h: int) -> float:
         """Time of lap L+h if laps L+1..L+h are all clean and on the set the car has at L."""
@@ -150,7 +179,10 @@ def tyre_labels(rows: list[dict], final: RaceState) -> None:
             continue
         row["y_next_lap"] = race.ahead(drv, L, 1)
         row["y_lap_5"] = race.ahead(drv, L, 5)
-        row["y_cliff_3"] = race.cliff(drv, L)
+        for h in CLIFF_HORIZONS:
+            row[f"y_cliff_{h}"] = race.cliff(drv, L, h)
+        row["y_deg_5"] = race.deg(drv, L)
+        row["y_pace_5"] = race.pace(drv, L)
 
 
 # ----------------------------------------------------------------------------- selections
@@ -169,14 +201,32 @@ def lap5_rows(df: pd.DataFrame) -> pd.DataFrame:
     return d[d["y_lap_5"].notna()].copy()
 
 
-def cliff_rows(df: pd.DataFrame) -> pd.DataFrame:
+def cliff_rows(df: pd.DataFrame, h: int = CLIFF_LAPS) -> pd.DataFrame:
+    """Dry lap-end rows (no car about to retire, last lap timed) where the cliff over ``h`` laps could be seen
+    (no stop, SC or race end before L+h+1; see ``_Race.cliff``)."""
     d = _dry_lap_end(df)
-    return d[d["y_cliff_3"].notna()].copy()
+    return d[d[f"y_cliff_{h}"].notna()].copy()
+
+
+def deg5_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Dry lap-end rows whose next 5 laps were on the same set with 4+ clean laps (conditional on running clean)."""
+    d = _dry_lap_end(df)
+    return d[d["y_deg_5"].notna()].copy()
+
+
+def pace5_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Dry lap-end rows whose next 5 laps were on the same set with 3+ clean laps (conditional on running clean)."""
+    d = _dry_lap_end(df)
+    return d[d["y_pace_5"].notna()].copy()
 
 
 def fresh_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Pit entries with a timed last lap whose first flying lap on a new dry set was clean. The compound fitted
+    is the question asked ("if you fit X now?"), so it is copied into the what-if input ``ask_compound``."""
     d = df[(df["kind"] == "pit_entry") & df["y_fresh_lap"].notna()]
-    return d[d["last_lap"].notna()].copy()
+    d = d[d["last_lap"].notna()].copy()
+    d["ask_compound"] = d["y_fresh_compound"]
+    return d
 
 
 # ----------------------------------------------------------------------------- models
@@ -256,6 +306,31 @@ class BaseRate:
         return np.full(len(df), self.p)
 
 
+class TyreExtrapMid(TyreExtrap5):
+    """Mean of laps L+1..L+5 from the engineer: its lap L+3, pace_s + 2 * (deg_s_per_lap - fuel_s_per_lap)."""
+
+    name = "tyre_extrap_mid"
+
+    def predict(self, df):
+        pace = _col(df, "tyre__pace_s", "tyre__last_clean_s", "last_lap")
+        slope = _col(df, "tyre__deg_s_per_lap") - _col(df, "tyre__fuel_s_per_lap")
+        return pace + 2 * np.nan_to_num(slope)
+
+
+class TyreDeg:
+    """The engineer's ``deg_s_per_lap`` (the training races' median where it has none)."""
+
+    name = "tyre_deg"
+
+    def fit(self, df, target):
+        self.m = float(np.nanmedian(df[target].to_numpy(float))) if len(df) else 0.0
+        return self
+
+    def predict(self, df):
+        v = _col(df, "tyre__deg_s_per_lap")
+        return np.where(np.isnan(v), self.m, v)
+
+
 class TyreCliffRisk:
     """The engineer's ``cliff_risk`` (base rate of the training races where it is missing)."""
 
@@ -292,9 +367,16 @@ class _ResidualGBM:
     name = ""
     ref_cols: tuple[str, ...] = ("tyre__pace_s", "tyre__last_clean_s", "last_lap")
     clip = 5.0
+    wide = False  # also every bench feature (``feature_columns()``)
 
     def _ref(self, df):
         return _col(df, *self.ref_cols)
+
+    def _x(self, df, ref):
+        x = _rel_features(df, ref)
+        if self.wide:
+            x = x.join(num(df, [c for c in feature_columns() if c not in x]))
+        return x
 
     def fit(self, df, target):
         ref = self._ref(df)
@@ -303,12 +385,12 @@ class _ResidualGBM:
         self.model = HistGradientBoostingRegressor(
             max_iter=200, learning_rate=0.05, max_leaf_nodes=15, min_samples_leaf=100, l2_regularization=1.0,
             loss="absolute_error", random_state=0,
-        ).fit(_rel_features(df, ref)[ok], y[ok])
+        ).fit(self._x(df, ref)[ok], y[ok])
         return self
 
     def predict(self, df):
         ref = self._ref(df)
-        return ref + self.model.predict(_rel_features(df, ref))
+        return ref + self.model.predict(self._x(df, ref))
 
 
 class NextLapGBM(_ResidualGBM):
@@ -322,6 +404,33 @@ class Lap5GBM(_ResidualGBM):
 
     def _ref(self, df):
         return TyreExtrap5().predict(df)
+
+
+class Pace5GBM(_ResidualGBM):
+    """Learned correction to the engineer's mid-window lap (``tyre_extrap_mid``), on every bench feature."""
+
+    name = "pace5_gbm"
+    wide = True
+
+    def _ref(self, df):
+        return TyreExtrapMid().predict(df)
+
+
+class DegGBM(_ResidualGBM):
+    """Learned correction to the engineer's ``deg_s_per_lap`` (0 where it has none), on every bench feature."""
+
+    name = "deg_gbm"
+    wide = True
+    clip = 1.0
+
+    def _ref(self, df):
+        return np.nan_to_num(_col(df, "tyre__deg_s_per_lap"))
+
+
+class CliffFeatureGBM(FeatureGBM):
+    """Boosted trees on every bench feature, the engineer's ``cliff_risk`` among them."""
+
+    name = "cliff_feature_gbm"
 
 
 class CliffGBM:
@@ -345,11 +454,12 @@ class CliffGBM:
 def _fresh_pred(df: pd.DataFrame) -> np.ndarray:
     """``fresh_<compound>_s`` for the compound actually fitted.
 
-    The fitted compound (``y_fresh_compound``) is part of the question - "if you fit X
-    now, how fast is the first flying lap?" - not something being predicted.
+    The compound (``ask_compound``, set by ``fresh_rows`` from the stop being scored) is part
+    of the question - "if you fit X now, how fast is the first flying lap?" - not something
+    being predicted. Without it the answer is NaN and callers fall back to the stint's best.
     """
     out = np.full(len(df), np.nan)
-    comp = df["y_fresh_compound"].to_numpy()
+    comp = df["ask_compound"].to_numpy() if "ask_compound" in df else np.full(len(df), "")
     for c in DRY_COMPOUNDS:
         col = f"tyre__fresh_{c.lower()}_s"
         if col in df:
@@ -392,5 +502,12 @@ def tyre_tasks(**_) -> list[Task]:
         Task("tyre_cliff_3", "binary", "y_cliff_3", cliff_rows, (BaseRate, TyreCliffRisk, CliffGBM),
              keep=("compound", "tyre_age")),
         Task("fresh_tyre_pace", "regression", "y_fresh_lap", fresh_rows, (StintBest, TyreFresh, FreshGBM),
-             keep=("y_fresh_compound", "sc", "vsc")),
+             keep=("ask_compound", "sc", "vsc")),
+        *[task(f"tyre_cliff_{h}", "binary", f"y_cliff_{h}", partial(cliff_rows, h=h),
+               (BaseRate, TyreCliffRisk, CliffGBM, CliffFeatureGBM), keep=("compound", "tyre_age"), primary="log_loss")
+          for h in CLIFF_HORIZONS if h != CLIFF_LAPS],
+        task("deg_rate_5", "regression", "y_deg_5", deg5_rows, (TyreDeg, DegGBM), keep=("compound", "tyre_age"),
+             primary="mae"),
+        task("pace_5_mean", "regression", "y_pace_5", pace5_rows, (TyrePace, TyreExtrapMid, Pace5GBM),
+             keep=("compound", "tyre_age"), primary="mae"),
     ]

@@ -7,7 +7,14 @@ from pathlib import Path
 
 
 def data_dir() -> Path:
-    return Path(os.environ.get("PITSENSE_DATA", "data")).resolve()
+    override = os.environ.get("PITSENSE_DATA")
+    if override:
+        return Path(override).resolve()
+    project = Path(__file__).resolve().parents[2]
+    # Editable installs share the checkout's data, regardless of the launch directory.
+    if (project / "pyproject.toml").is_file():
+        return project / "data"
+    return Path("data").resolve()
 
 
 def raw_dir() -> Path:

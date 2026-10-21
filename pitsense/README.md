@@ -31,7 +31,7 @@ pitsense calibrate                                                       # refit
 
 The dashboard shows the timing tower, a live track map, your team's calls with Plan A/B, and a radio conversation panel. In that panel, real driver radio is transcribed by Whisper, and the pit wall's calls are written by the fine-tuned voice model and spoken by Piper. Type or hold-to-talk questions such as "what if we box now?", "what if the safety car comes next lap?" or "box now for inters?"; the race simulator answers them (the wet simulator when it is wet). Each call can be accepted or rejected with a reason, shows what it changed from and why, and carries a confidence calibrated on earlier races; `pitsense shadow-score` grades the calls and the operator's answers after the race.
 
-How a team uses it from day one: [docs/pitwall.md](docs/pitwall.md). How it is built, and the rules every engineer follows: [docs/ENGINEERING.md](docs/ENGINEERING.md).
+How a team uses it from day one: [docs/pitwall.md](docs/pitwall.md). How it is built, and the rules every engineer follows: [docs/ENGINEERING.md](docs/ENGINEERING.md). What comes next, and the paper we are writing from it: [docs/RESEARCH_PLAN.md](docs/RESEARCH_PLAN.md).
 
 **Honest status.** Every number below is a backtest on the 2026 races, each scored with models trained only on races that finished before it. Box-call timing is still the weakest part (see [Results](#results)). Run it in shadow mode (`pitsense shadow-score`) before trusting it.
 
@@ -54,6 +54,11 @@ python -m pytest -q                                   # the real-race tests skip
 
 If you can't change the execution policy, skip activation and put `.venv\Scripts\` in front of commands. For example: `.venv\Scripts\python -m pip install -e ".[dev]"`, then `.venv\Scripts\pitsense bench run`. Without either, `pip` installs into your global Python instead of the project's environment.
 
+An editable install uses this checkout's `data` folder even when launched from the parent `aiml` directory.
+Override it with `pitsense --data <folder> ...` or `PITSENSE_DATA`. A packaged install defaults to `./data`.
+If there are virtual environments in both `aiml` and `aiml\pitsense`, use the one where you installed the dependencies;
+`Get-Command pitsense` shows which executable PowerShell will run.
+
 **macOS / Linux**
 
 ```bash
@@ -64,6 +69,9 @@ pip install -e ".[dev]" && pytest -q
 ## The viewer (dashboard)
 
 No Node or build step: the dashboard ships with the package and is served by `pitsense pitwall` (alias `pitsense serve`).
+Archive replays download missing timing and telemetry streams for the map and driver panels, reusing cached files.
+Without a stored outline from an earlier race, the map builds from positions received after the first clean laps;
+it stays unavailable if the archive does not publish position data.
 
 ```powershell
 .venv\Scripts\Activate.ps1

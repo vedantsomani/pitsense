@@ -39,6 +39,9 @@ _PLAN = re.compile(r"\bplan ([ab])\b", re.I)
 _LAP = re.compile(r"\blaps? (\d+)(?: of (\d+))?\b", re.I)
 # the words before a lap named for a stop: "box on lap", "stops on lap", "then on lap"
 _BOX_ON = re.compile(r"(?:\b(?:box(?:es|ing)?|pit(?:s|ting)?|stop(?:s|ping|ped)?)\b[^.;,]*|\bthen)\s+(?:on|at)\s*$", re.I)
+_PENALTY = re.compile(
+    r"\b(\d+(?:\.\d+)?)\s*[- ]?\s*(?:seconds?|secs?|s)\s+(?:of\s+)?penalt(?:y|ies)\b"
+    r"|\bpenalt(?:y|ies)(?:\s+(?:of|is|for))?\s*:?\s*(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b", re.I)
 _CPD = r"(soft|medium|hard|wet|inter(?:mediate)?)s?"
 # the tyre being fitted: "for hards", "onto softs", "to the mediums", "take hards", "hards going on", "hards ready", "plan on hards"
 _NEW_TYRE = re.compile(
@@ -77,10 +80,15 @@ class _Call:
     loose: set[str] = field(default_factory=set)  # neighbours not told apart by TLA: only the car number, or a TLA two cars share
     plans: dict[str, set[tuple[str, str]]] = field(default_factory=dict)  # "A" / "B" -> {(in-lap, compound)}
     quoted: list[str] = field(default_factory=list)  # free text the input carries (trigger, reasons): the output may repeat it
+    penalties: set[str] = field(default_factory=set)
+    gap_target: str = ""
 
 
 def _parse(inp: str) -> _Call:
     c = _Call()
+    head = inp.split(" | ", 1)[0].split()
+    target = head[1] if len(head) >= 3 and head[0] == "ask_gap" else None
+    kind = composer.free_kind(" ".join(head[1:-1])) if head and head[0] == "free" else None
     nbrs = []
     for f in inp.split(" | ")[1:]:
         tag, *p = f.split() or [""]
@@ -94,11 +102,17 @@ def _parse(inp: str) -> _Call:
             c.lap, c.total = p[0], p[1] if len(p) > 1 else None
         elif tag in ("AH", "BH") and len(p) >= 2:
             nbrs.append((p[1], "ahead" if tag == "AH" else "behind", p[2] if len(p) > 2 else None))
+            if p[0] == target or (tag == "AH" and kind == "gap_ahead") or (tag == "BH" and kind == "gap_behind"):
+                c.gap_target = p[1]
         elif tag in ("PA", "PB") and p and p[0].isdigit():
             s = p[1: 1 + 2 * int(p[0])]
             c.plans[tag[1]] = {(s[i], _canon(s[i + 1])) for i in range(0, len(s) - 1, 2)}
         elif tag == "TRG":
             c.quoted.append(f[3:].strip())
+        elif tag == "PEN" and p:
+            c.penalties.add(p[0])
+        elif tag == "R" and len(p) >= 2 and p[0] == "penalty_serve" and _NUM.fullmatch(p[1]):
+            c.penalties.add(p[1])
         elif tag == "R" and " ~ " in f:
             c.quoted.append(f.split(" ~ ", 1)[1].strip())
     for name, side, gap in nbrs:
@@ -206,9 +220,15 @@ def relation_errors(inp: str, out: str, skip: set[str] | frozenset[str] = frozen
     reject a correct sentence (the caller then serves the template), it must not pass a wrong one."""
     c, skip = _parse(inp), set(skip)
     errs: list[str] = []
+    if c.gap_target and not re.search(rf"(?<!\w){re.escape(c.gap_target)}(?!\w|\.\d)", out):
+        errs.append(f"gap answer is not about {c.gap_target}")
     for sent in _SENT.split(_unquote(out, c.quoted)):
         marks = [(m.start(), m.group(1).upper()) for m in _PLAN.finditer(sent)]
         errs += _gaps(c, sent, skip) + _laps(c, sent, marks, skip) + _tyres(c, sent, marks, skip)
+        for m in _PENALTY.finditer(sent):
+            n = next(g for g in m.groups() if g is not None)
+            if n not in skip and n not in c.penalties:
+                errs.append(f"penalty {n} is not pending")
     return list(dict.fromkeys(errs))
 
 

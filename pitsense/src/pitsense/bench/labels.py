@@ -5,13 +5,18 @@ predictions and must never be imported by feature code.
 
 Pit-lane entries under a red flag are not strategy stops (everyone goes in and
 tyres are changed for free), so they are ignored here.
+
+``y_pit_{k}`` (lap-end rows): the car's next stop ends lap L+1..L+k. ``y_pit_{k}_known``: that outcome
+was observed (discrete-time hazard censoring): it stopped within k laps, or it was still running at the
+end of lap L+k, or it finished (lapped finishers included; a finisher cannot stop after the flag). A car
+that retires before completing lap L+k without stopping is censored (known = 0).
 """
 
 from __future__ import annotations
 
 from ..state import RaceState
 
-HORIZONS = (1, 2, 3, 5)
+HORIZONS = (1, 2, 3, 5, 8)
 
 
 def add_labels(rows: list[dict], final: RaceState) -> list[dict]:
@@ -52,4 +57,6 @@ def pit_labels(rows: list[dict], final: RaceState) -> None:
         nxt = future[0] if future else None
         row["y_next_in_lap"] = float(nxt) if nxt is not None else float("nan")
         for k in HORIZONS:
-            row[f"y_pit_{k}"] = int(nxt is not None and nxt <= L + k)
+            hit = nxt is not None and nxt <= L + k
+            row[f"y_pit_{k}"] = int(hit)
+            row[f"y_pit_{k}_known"] = int(hit or drv not in retired or done >= L + k)

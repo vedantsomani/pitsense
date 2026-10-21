@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .. import events as _events  # the feeder: reads the log; exempt by name in tests/test_pitwall.py
+from ..config import DEFAULT_TOPICS, TELEMETRY_TOPICS, data_dir
 from .types import TeamConfig
 from .runtime import ASK_WAIT_S, PUBLISH_EVERY_S, PitWallRuntime  # noqa: F401
 from .shadow import load_call_log, shadow_score
@@ -32,7 +33,7 @@ SESSION_NAMES = {None: None, "race": "Race", "sprint": "Sprint", "qualifying": "
 
 def build_source(a) -> Source:
     if a.live:
-        out = Path(a.out) if a.out else Path(os.environ.get("PITSENSE_DATA", "data")) / "live" / (
+        out = Path(a.out) if a.out else data_dir() / "live" / (
             datetime.now().strftime("%Y%m%dT%H%M%S") + "-live.jsonl")
         return LiveSource(out, minutes=a.minutes, no_auth=a.no_auth)
     if a.file and a.follow:
@@ -47,8 +48,7 @@ def build_source(a) -> Source:
         raise SystemExit("give --race (archive replay), --file (a recording) or --live")
     from .. import archive
     ref = archive.find_session(a.year, a.race, SESSION_NAMES.get(a.session) or ("Sprint" if a.sprint else "Race"))
-    if not (ref.local_dir / "TimingData.jsonStream").exists():
-        archive.download_session(ref)
+    archive.download_session(ref, topics=DEFAULT_TOPICS + TELEMETRY_TOPICS)
     return ReplaySource(load_with_feeds(ref.local_dir), a.speed, ref=ref)
 
 
@@ -111,8 +111,7 @@ def cmd_doctor(a) -> None:
 
     # 4. Disk space
     try:
-        data_dir = Path(os.environ.get("PITSENSE_DATA", "data"))
-        stat = shutil.disk_usage(data_dir)
+        stat = shutil.disk_usage(data_dir())
         free_gb = stat.free / (1024 ** 3)
         if free_gb > 1:
             checks.append(("Disk space", "OK", f"{free_gb:.1f} GB free"))
@@ -153,7 +152,6 @@ def cmd_doctor(a) -> None:
 
 
 def cmd_pitwall(a) -> None:
-    from ..config import data_dir
     from ..web.server import serve
 
     src = build_source(a)

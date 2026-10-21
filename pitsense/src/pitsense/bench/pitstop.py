@@ -14,9 +14,11 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
-from ..pitloss import LapIndex, measure_stop
+from ..pitloss import STATIONARY_RANGE, LapIndex, _pss_by_stop, measure_stop
 from .evaluate import EvalResult, evaluate_task
+from .hazard import FeatureGBM, FeatureGBMRegressor, task
 from .metrics import regression_scores
+from .models import BaseRate
 from .tasks import Task
 
 PS = (
@@ -35,10 +37,15 @@ LOSS_COLS = (
 
 # ----------------------------------------------------------------------------- labels (the finished race)
 def pitstop_labels(rows: list[dict], final) -> None:
-    """``y_pit_loss`` / ``y_pit_cond``: the stop's measured loss, for pit entries whose stop is typical."""
+    """Pit-entry rows: ``y_pit_loss`` / ``y_pit_cond`` (the stop's measured loss, typical stops only);
+    ``y_stationary`` (official stationary time clipped to ``STATIONARY_RANGE``, NaN without a record: before the
+    2024 US GP); ``y_stop_lost_pos`` / ``y_stop_gained_pos`` (rejoined behind / ahead of the position at entry,
+    from ``y_pos_after_stop``, so ``pit_labels`` must run first)."""
     idx = LapIndex(final.laps)
     log = list(final.status_log)
+    pss = _pss_by_stop(final.pit_stops)
     cache: dict[int, object] = {}
+    nan = float("nan")
     for row in rows:
         if row.get("kind") != "pit_entry":
             continue
@@ -47,8 +54,15 @@ def pitstop_labels(rows: list[dict], final) -> None:
             cache[i] = measure_stop(idx, final.pit_events[i], log)
         m = cache[i]
         ok = m is not None and m.typical
-        row["y_pit_loss"] = m.loss if ok else float("nan")
+        row["y_pit_loss"] = m.loss if ok else nan
         row["y_pit_cond"] = m.condition if ok else ""
+        rec = pss.get((row["driver"], final.pit_events[i].in_lap))
+        st = rec.stop_time if rec is not None else None
+        row["y_stationary"] = nan if st is None else float(np.clip(st, *STATIONARY_RANGE))
+        after, before = row.get("y_pos_after_stop", nan), row.get("position", nan)
+        known = after == after and before == before
+        row["y_stop_lost_pos"] = float(after > before) if known else nan
+        row["y_stop_gained_pos"] = float(after < before) if known else nan
 
 
 # ----------------------------------------------------------------------------- position after a stop
@@ -163,5 +177,100 @@ def _evaluate_loss(df: pd.DataFrame, *, test_year: int, min_train_races: int) ->
     return EvalResult("pit_loss", board, r.per_race, P, {})
 
 
+# ----------------------------------------------------------------------------- stationary time, places lost / gained
+def stationary_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Pit entries with an official stationary time (published from the 2024 US GP on; earlier races have none)."""
+    return df[(df["kind"] == "pit_entry") & df["y_stationary"].notna()].copy()
+
+
+def place_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Pit entries whose position at entry and rejoin position (end of the out-lap) are both known.
+    Only cars that actually boxed: the "if I box now" counterfactual isn't observed on lap-end rows."""
+    return df[(df["kind"] == "pit_entry") & df["y_stop_lost_pos"].notna()].copy()
+
+
+class StationaryEngineer:
+    """The pit-stop engineer's ``stationary_s`` for the team (the training rows' median where it has none)."""
+
+    name = "pitstop_stationary"
+
+    def fit(self, df, target):
+        self.m = float(df[target].median())
+        return self
+
+    def predict(self, df):
+        v = pd.to_numeric(df.get("pitstop__stationary_s"), errors="coerce") if "pitstop__stationary_s" in df else None
+        return np.full(len(df), self.m) if v is None else v.fillna(self.m).to_numpy(float)
+
+
+class TeamMedian:
+    """Each team's median stationary time in the training races, shrunk to the field's (``SHRINK`` pseudo-stops)."""
+
+    name = "team_median"
+    SHRINK = 10.0
+
+    def fit(self, df, target):
+        self.m = float(df[target].median())
+        g = df.groupby("team")[target].agg(["median", "count"])
+        self.by = ((g["median"] * g["count"] + self.m * self.SHRINK) / (g["count"] + self.SHRINK)).to_dict()
+        return self
+
+    def predict(self, df):
+        return df["team"].map(self.by).fillna(self.m).to_numpy(float)
+
+
+class StationaryGBM(FeatureGBMRegressor):
+    """Correction to the engineer's stationary time from every bench feature and the pit-stop engineer's values."""
+
+    name = "stationary_gbm"
+    extra = tuple(f"pitstop__{k}" for k in PS)
+    params = dict(FeatureGBMRegressor.params, max_iter=100, max_leaf_nodes=6, min_samples_leaf=50,
+                  l2_regularization=10.0)
+
+    def fit(self, df, target):
+        self.base = StationaryEngineer().fit(df, target)
+        return super().fit(df, target)
+
+    def _ref(self, df):
+        return self.base.predict(df)
+
+
+class RulePlaces:
+    """How often the engineer's rejoin call (``pitstop_rule`` below / at / ahead of the entry position) came true
+    in the training races, Laplace-smoothed."""
+
+    name = "pitstop_rule_rate"
+
+    def _cell(self, df):
+        return np.sign(PitstopRule().predict(df) - df["position"].to_numpy(float))
+
+    def fit(self, df, target):
+        y, c = df[target].to_numpy(float), self._cell(df)
+        self.p0 = float(y.mean())
+        self.p = {k: (y[c == k].sum() + self.p0) / ((c == k).sum() + 1.0) for k in (-1.0, 0.0, 1.0)}
+        return self
+
+    def predict(self, df):
+        return np.array([self.p.get(c, self.p0) for c in self._cell(df)], dtype=float)
+
+
+class PlacesGBM(FeatureGBM):
+    """Boosted trees on every bench feature and the pit-stop engineer's values (pit-entry sized leaves)."""
+
+    name = "places_gbm"
+    extra = tuple(f"pitstop__{k}" for k in PS) + ("pitstop__rejoin_if_box_now",)
+    params = dict(FeatureGBM.params, min_samples_leaf=50)
+
+
+PLACE_MODELS = (BaseRate, RulePlaces, PlacesGBM)
+
+
 def pitstop_tasks(**_) -> list[Task]:
-    return [Task("pit_loss", "regression", "y_pit_loss", loss_rows, LOSS_MODELS, evaluate=_evaluate_loss)]
+    keep = ("position", "y_pos_after_stop", "sc", "vsc")
+    return [
+        Task("pit_loss", "regression", "y_pit_loss", loss_rows, LOSS_MODELS, evaluate=_evaluate_loss),
+        task("stationary_time", "regression", "y_stationary", stationary_rows,
+             (StationaryEngineer, TeamMedian, StationaryGBM), keep=("team",), primary="mae"),
+        task("stop_loses_place", "binary", "y_stop_lost_pos", place_rows, PLACE_MODELS, keep=keep, primary="log_loss"),
+        task("stop_gains_place", "binary", "y_stop_gained_pos", place_rows, PLACE_MODELS, keep=keep, primary="log_loss"),
+    ]

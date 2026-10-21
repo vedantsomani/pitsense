@@ -235,6 +235,25 @@ def test_cli_command_registered(capsys):
     assert "--speed" in capsys.readouterr().out
 
 
+def test_archive_replay_fetches_positions_even_when_timing_is_cached(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+
+    from pitsense import archive
+    from pitsense.config import TELEMETRY_TOPICS
+    from pitsense.pitwall import commands
+
+    (tmp_path / "TimingData.jsonStream").write_text('00:00:01.000{"Lines":{}}\n', encoding="utf-8")
+    ref = SimpleNamespace(local_dir=tmp_path, slug="test", start_utc=datetime(2025, 1, 1, tzinfo=timezone.utc))
+    requested = []
+    monkeypatch.setattr(archive, "find_session", lambda *args: ref)
+    monkeypatch.setattr(archive, "download_session", lambda ref, topics: requested.extend(topics))
+    p = argparse.ArgumentParser()
+    add_commands(p.add_subparsers())
+    src = commands.build_source(p.parse_args(["pitwall", "--race", "test"]))
+    assert src.ref is ref and "TimingData" in src.log.topics()
+    assert set(TELEMETRY_TOPICS) <= set(requested)
+
+
 def test_token_defaults_to_the_environment(monkeypatch):
     def parse(*argv):
         p = argparse.ArgumentParser()

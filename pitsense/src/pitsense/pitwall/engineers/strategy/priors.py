@@ -28,6 +28,9 @@ PASS_OFF_SD = 0.6  # prior sd of a circuit's overtaking-difficulty shift (logit 
 AIR_DEFAULT = 0.25  # s/lap lost running within 1 s of the car ahead (no history)
 SHRINK_AIR = 30.0  # pseudo-weight pulling a circuit's dirty-air loss toward the pool
 CLEAR_S = 2.0  # a lap started this far behind the car ahead is in clear air
+SLOW_STATIONARY = 8.0  # s stationary: a slow stop (pitloss.STATIONARY_RANGE's upper end)
+SLOW_CAP_S = 40.0  # s over the race's median stationary time: damage or a repair, not a slow stop
+SHRINK_SLOW = 40.0  # pseudo-stops pulling a team's slow-stop rate toward the pool
 
 
 def pass_bin(delta: float) -> int:
@@ -229,6 +232,8 @@ class Priors:
 
     def __init__(self, past_races, circuit) -> None:
         self.circuit = circuit
+        self._past = list(past_races)
+        self._slow = None  # slow-stop tables, learnt on first use (slow_stops)
         pool: dict[str, list[int]] = {c: [] for c in DRY}
         pool_open: dict[str, list[int]] = {c: [] for c in DRY}
         circ: dict[str, list[int]] = {c: [] for c in DRY}
@@ -250,7 +255,7 @@ class Priors:
         air_n = air_d = air_cn = air_cd = 0.0
         loss = {k: [] for k in ("green", "sc", "vsc")}
         closs = {k: [] for k in ("green", "sc", "vsc")}
-        for race in past_races:
+        for race in self._past:
             ex = (race.extra or {}).get("strategy")
             if not ex:
                 continue
@@ -389,8 +394,44 @@ class Priors:
             out[i] = [self.hz_base[k] * mult[_phase_bin(A + 1 + j, total)] for j in range(R)]
         return out
 
+    def slow_stops(self, teams: list[str]):
+        """(chance per stop [C], sorted extra seconds) of a slow stop, from the past races' stationary times (the pitstop
+        summaries' ``stops[].stationary``, 2024 US GP on): a stop is slow at ``SLOW_STATIONARY`` s or more, its extra time
+        is the excess over that race's median (above ``SLOW_CAP_S`` it is damage, not a slow stop). A team's rate is shrunk
+        to the pool by ``SHRINK_SLOW`` stops. Served time penalties are not marked in the summaries: a 10 s penalty
+        served at a stop counts as slow (a 5 s one stays under the bar). No stationary times: the pooled defaults."""
+        import numpy as np
+
+        from .sim import SLOW_P, SLOW_TAB
+
+        if self._slow is None:
+            n, k, by, excess = 0, 0, {}, []
+            for race in self._past:
+                st = [x for x in ((race.extra or {}).get("pitstop") or {}).get("stops", ())
+                      if isinstance(x.get("stationary"), (int, float)) and x["stationary"] > 0]
+                if len(st) < 5:
+                    continue
+                med = sorted(x["stationary"] for x in st)[len(st) // 2]
+                for x in st:
+                    s = float(x["stationary"])
+                    if s - med > SLOW_CAP_S:
+                        continue
+                    slow = s >= SLOW_STATIONARY
+                    n, k = n + 1, k + slow
+                    t = by.setdefault(str(x.get("team") or ""), [0, 0])
+                    t[0], t[1] = t[0] + 1, t[1] + slow
+                    if slow:
+                        excess.append(round(s - med, 2))
+            pool = (k + 50 * SLOW_P) / (n + 50)
+            self._slow = (pool, {t: (v[1] + SHRINK_SLOW * pool) / (v[0] + SHRINK_SLOW) for t, v in by.items()},
+                          tuple(sorted(excess)) if len(excess) >= 10 else SLOW_TAB)
+        pool, by_team, tab = self._slow
+        return np.array([by_team.get(t, pool) for t in teams], dtype=float), tab
+
     def fill(self, F) -> None:
-        """Put the tables the simulator samples from on a FieldIn (after its laps and losses are set)."""
+        """Put the tables the simulator samples from on a FieldIn (after its laps and losses are set). The circuit's
+        pit losses (``self.loss``) only fill a loss the FieldIn lacks: ``analysis.build_field`` always sets them from
+        the pitstop engineer or the pit-loss prior, so they matter for fields built elsewhere."""
         F.sc_rate, F.vsc_rate, F.sc_len, F.vsc_len = self.sc_rate, self.vsc_rate, self.sc_len, self.vsc_len
         F.pass_p = tuple(self.pass_p)
         F.haz = self.hazard(F.A, F.total)

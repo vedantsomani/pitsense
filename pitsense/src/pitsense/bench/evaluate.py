@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -11,7 +12,8 @@ import numpy as np
 import pandas as pd
 
 from ..asof import assert_trained_before
-from .metrics import binary_scores, calibration_table, position_scores, regression_scores
+from .metrics import (binary_scores, calibration_table, ece, higher_is_better, multiclass_scores, paired_race_bootstrap,
+                      position_scores, regression_scores)
 from .tasks import Task, core_tasks
 
 # a Grand Prix lasts at most ~4h (incl. red flags); used as a conservative end time
@@ -25,6 +27,12 @@ class EvalResult:
     per_race: pd.DataFrame
     predictions: pd.DataFrame
     calibration: dict[str, pd.DataFrame]
+    primary: str = ""  # the leaderboard's primary metric (per_race holds it per race)
+
+
+def proba_col(model: str, cls: str) -> str:
+    """Predictions-file column of a multiclass model's probability for one class."""
+    return f"{model}:{cls}"
 
 
 def _races(df: pd.DataFrame) -> pd.DataFrame:
@@ -40,14 +48,21 @@ def _splits(df: pd.DataFrame, test_year: int, min_train_races: int):
         yield race.race_id, train, df[df.race_id == race.race_id]
 
 
-def fit_predict(cls, train: pd.DataFrame, test: pd.DataFrame, target: str) -> np.ndarray:
+def fit_predict(cls, train: pd.DataFrame, test: pd.DataFrame, target: str, timing: list | None = None) -> np.ndarray:
     """Fit a fresh model on ``train`` and predict ``test``.
 
     Every model in every task goes through here, so this is where the training
     cutoff is enforced: no training race may still be running when the test race starts.
+    ``timing`` (optional) gets one (fit seconds, predict seconds, rows) tuple appended.
     """
     assert_trained_before([train.start_utc.max() + RACE_SPAN], test.start_utc.min())
-    return cls().fit(train, target).predict(test)
+    t0 = time.perf_counter()
+    model = cls().fit(train, target)
+    t1 = time.perf_counter()
+    pred = model.predict(test)
+    if timing is not None:
+        timing.append((t1 - t0, time.perf_counter() - t1, len(test)))
+    return pred
 
 
 def fit_predict_cdf(cls, train: pd.DataFrame, test: pd.DataFrame) -> np.ndarray:
@@ -59,60 +74,67 @@ def fit_predict_cdf(cls, train: pd.DataFrame, test: pd.DataFrame) -> np.ndarray:
 def evaluate_task(task: Task, df: pd.DataFrame, test_year: int = 2026, min_train_races: int = 10) -> EvalResult:
     if task.evaluate is not None:
         return task.evaluate(df, test_year=test_year, min_train_races=min_train_races)
+    if task.kind not in _SCORERS:
+        hint = "a survival task must supply its own evaluate (see bench/laps_to_stop.py)" if task.kind == "survival" \
+            else f"generic kinds: {sorted(_SCORERS)}"
+        raise ValueError(f"{task.name}: kind {task.kind!r} has no generic scorer; {hint}")
+    if task.kind == "multiclass" and not task.classes:
+        raise ValueError(f"{task.name}: a multiclass task needs classes")
     data = task.select(df)
-    preds = []
+    preds, timing = [], {cls.name: [] for cls in task.models}
     for _race_id, train, test in _splits(data, test_year, min_train_races):
         out = test[["race_id", "driver", "tla", "lap", "t", *task.keep, task.target]].copy()
         for cls in task.models:
-            out[cls.name] = fit_predict(cls, train, test, task.target)
+            p = fit_predict(cls, train, test, task.target, timing[cls.name])
+            if task.kind == "multiclass":
+                p = np.asarray(p, dtype=float)
+                if p.shape != (len(test), len(task.classes)):
+                    raise ValueError(f"{task.name}/{cls.name}: predict gave shape {p.shape}, want ({len(test)}, {len(task.classes)})")
+                out = out.assign(**{proba_col(cls.name, c): p[:, i] for i, c in enumerate(task.classes)})
+            else:
+                out[cls.name] = p
         preds.append(out)
     if not preds:
         raise ValueError(f"{task.name}: no {test_year} race has {min_train_races}+ earlier races to train on")
-    return _SCORERS[task.kind](task, pd.concat(preds, ignore_index=True))
+    return _score(task, pd.concat(preds, ignore_index=True), timing)
 
 
-def _score_binary(task: Task, P: pd.DataFrame) -> EvalResult:
-    names = [c.name for c in task.models]
-    y = P[task.target].to_numpy(float)
-    board = pd.DataFrame([{"model": n, **binary_scores(y, P[n].to_numpy(float))} for n in names])
-    board["brier_skill"] = 1 - board["brier"] / board.loc[0, "brier"]  # vs the reference baseline
-    board = board.sort_values("log_loss").reset_index(drop=True)
-    per_race = (
-        P.groupby("race_id", sort=False)
-        .apply(lambda g: pd.Series({n: binary_scores(g[task.target].to_numpy(float), g[n].to_numpy(float))["log_loss"] for n in names}), include_groups=False)
-        .reset_index()
-    )
-    cal = {n: calibration_table(y, P[n].to_numpy(float)) for n in names}
-    return EvalResult(task.name, board, per_race, P, cal)
+_SCORERS = {
+    "binary": lambda task, y, p: binary_scores(y, p),
+    "position": lambda task, y, p: position_scores(y, p),
+    "regression": lambda task, y, p: regression_scores(y, p),
+    "multiclass": lambda task, y, p: multiclass_scores(y, p, task.classes),
+}
 
 
-def _score_position(task: Task, P: pd.DataFrame) -> EvalResult:
-    names = [c.name for c in task.models]
-    y = P[task.target].to_numpy(float)
-    board = pd.DataFrame([{"model": n, **position_scores(y, P[n].to_numpy(float))} for n in names])
-    board = board.sort_values(["mae", "exact"], ascending=[True, False]).reset_index(drop=True)
-    per_race = (
-        P.groupby("race_id", sort=False)
-        .apply(lambda g: pd.Series({n: position_scores(g[task.target], g[n])["exact"] for n in names}), include_groups=False)
-        .reset_index()
-    )
-    return EvalResult(task.name, board, per_race, P, {})
+def _score(task: Task, P: pd.DataFrame, timing: dict[str, list]) -> EvalResult:
+    """Micro (row-pooled) scores, the primary metric per race and its macro mean, the paired race-bootstrap
+    delta vs the baseline (models[0]; negative = lower metric), and fit/predict cost."""
+    names, metric, score, multi = [c.name for c in task.models], task.metric, _SCORERS[task.kind], task.kind == "multiclass"
 
+    def ys(S):
+        return S[task.target].to_numpy(object if multi else float)
 
-def _score_regression(task: Task, P: pd.DataFrame) -> EvalResult:
-    names = [c.name for c in task.models]
-    y = P[task.target].to_numpy(float)
-    board = pd.DataFrame([{"model": n, **regression_scores(y, P[n].to_numpy(float))} for n in names])
-    board = board.sort_values("mae").reset_index(drop=True)
-    per_race = (
-        P.groupby("race_id", sort=False)
-        .apply(lambda g: pd.Series({n: regression_scores(g[task.target], g[n])["mae"] for n in names}), include_groups=False)
-        .reset_index()
-    )
-    return EvalResult(task.name, board, per_race, P, {})
+    def pred(S, n):
+        return S[[proba_col(n, c) for c in task.classes]].to_numpy(float) if multi else S[n].to_numpy(float)
 
-
-_SCORERS = {"binary": _score_binary, "position": _score_position, "regression": _score_regression}
+    board = pd.DataFrame([{"model": n, **score(task, ys(P), pred(P, n))} for n in names])
+    if task.kind == "binary":
+        board["brier_skill"] = 1 - board["brier"] / board.loc[0, "brier"]  # vs the reference baseline
+        board["ece"] = [ece(ys(P), pred(P, n)) for n in names]
+    per_race = pd.DataFrame([{"race_id": r, "n": len(g), **{n: score(task, ys(g), pred(g, n))[metric] for n in names}}
+                             for r, g in P.groupby("race_id", sort=False)])
+    board[f"{metric}_macro"] = [float(per_race[n].mean()) for n in names]
+    ci = [paired_race_bootstrap(per_race, n, names[0]) for n in names]
+    board["d_vs_base"], board["d_lo"], board["d_hi"] = ([c[i] for c in ci] for i in range(3))
+    board["fit_s"] = [float(np.mean([f for f, _, _ in timing[n]])) for n in names]
+    board["pred_us"] = [1e6 * sum(p for _, p, _ in timing[n]) / max(sum(k for _, _, k in timing[n]), 1) for n in names]
+    if task.kind == "position" and metric == "mae":
+        board = board.sort_values(["mae", "exact"], ascending=[True, False])
+    else:
+        board = board.sort_values(metric, ascending=not higher_is_better(metric))
+    cal = {n: calibration_table(ys(P), pred(P, n)) for n in names} if task.kind == "binary" else {}
+    return EvalResult(task.name, board.reset_index(drop=True), per_race, P, cal, metric)
 
 
 def evaluate_pit(df: pd.DataFrame, horizon: int = 3, test_year: int = 2026, min_train_races: int = 10) -> EvalResult:
@@ -139,8 +161,9 @@ def write_report(results: list[EvalResult], out_dir: Path, meta: dict) -> Path:
         lines.append("")
         lines.append(_md_table(r.leaderboard))
         lines.append("")
-        if r.calibration:
-            best = r.leaderboard.iloc[0]["model"]
+        if r.calibration:  # the best model's table, else the first one there is (custom evaluations calibrate a subset)
+            best = r.leaderboard.iloc[0]["model"] if len(r.leaderboard) and "model" in r.leaderboard else None
+            best = best if best in r.calibration else next(iter(r.calibration))
             lines.append(f"Calibration of `{best}` (predicted vs observed rate):")
             lines.append("")
             lines.append(_md_table(r.calibration[best].assign(bin=lambda x: x["bin"].astype(str))))
@@ -150,7 +173,8 @@ def write_report(results: list[EvalResult], out_dir: Path, meta: dict) -> Path:
     path = out_dir / "leaderboard.md"
     path.write_text("\n".join(lines), encoding="utf-8")
     (out_dir / "leaderboard.json").write_text(
-        json.dumps({"meta": meta, **{r.task: r.leaderboard.to_dict(orient="records") for r in results}}, indent=1, default=str),
+        json.dumps({"meta": {**meta, "primary": {r.task: r.primary for r in results if r.primary}},
+                    **{r.task: r.leaderboard.to_dict(orient="records") for r in results}}, indent=1, default=str),
         encoding="utf-8",
     )
     return path

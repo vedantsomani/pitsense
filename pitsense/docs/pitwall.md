@@ -12,9 +12,14 @@ pip install -e .[live]      # only if you will record live sessions (FastF1)
 ```
 
 Race data for replays: `pitsense fetch --year 2026 --race hungary` (downloads the public archive).
-Optional trained models: `pitsense bench build` then `pitsense train` (see `docs/models.md`).
+Optional trained models: `pitsense bench build` then `pitsense train --before 2026 hungary` for that replay
+(see `docs/models.md`). A bundle trained on all downloaded races cannot be used for an earlier race.
 The wall loads the newest bundle that was trained before the race started; with none it runs
 without models (the screen says so in the top bar).
+
+Editable installs use the checkout's `data` folder from any launch directory. `--data <folder>` (before the
+command) or `PITSENSE_DATA` overrides it. Archive replays fetch missing telemetry along with timing;
+without an earlier stored outline, the map is built from the positions published during the replay.
 
 ## 2. Replay demo
 

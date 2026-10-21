@@ -8,7 +8,7 @@ from pitsense.asof import LeakageError
 from pitsense.bench.evaluate import RACE_SPAN
 from pitsense.bench.features import FeatureBuilder, feature_columns
 from pitsense.bench.models import BaseRate, NoChange
-from pitsense.modelstore import TrainedBundle, load_bundle, save_bundle, train_bundle
+from pitsense.modelstore import TrainedBundle, latest_bundle_for, load_bundle, save_bundle, train_bundle
 from pitsense.pitloss import PitLossPrior
 from pitsense.pitwall import Context, PitWall
 from pitsense.state import RaceState
@@ -98,6 +98,33 @@ def test_guard_refuses_a_bundle_trained_after_the_race_started(tmp_path):
     assert load_bundle(path).train_end_utc == late.train_end_utc  # loading without a race is allowed
     ok = save_bundle(_bundle(), tmp_path / "ok.pkl")
     assert load_bundle(ok, T0).models.keys() == _bundle().models.keys()
+
+
+def test_bundle_selection_reports_corrupt_files_and_preserves_cutoff(tmp_path, caplog):
+    from pitsense.bench.features import FEATURE_VERSION
+
+    safe = _bundle()
+    safe.feature_version = FEATURE_VERSION
+    save_bundle(safe, tmp_path / "safe.pkl")
+    late = _bundle(T0 + timedelta(hours=1))
+    late.feature_version = FEATURE_VERSION
+    save_bundle(late, tmp_path / "late.pkl")
+    (tmp_path / "broken.pkl").write_bytes(b"incomplete bundle")
+    result = latest_bundle_for(T0, tmp_path)
+    assert result.train_end_utc == safe.train_end_utc
+    assert "broken.pkl" in caplog.text and "cannot load model bundle" in caplog.text
+
+
+def test_missing_bundle_health_explains_how_to_train(tmp_path, monkeypatch):
+    from pitsense.pitwall.runtime import PitWallRuntime, ReplaySource
+    from .conftest import make_log
+
+    monkeypatch.setenv("PITSENSE_DATA", str(tmp_path))
+    rt = PitWallRuntime(ReplaySource(make_log(), 0, start_utc=T0))
+    rt._build_wall()
+    assert not rt.model_info["loaded"]
+    assert str(tmp_path / "models") in rt.model_info["error"]
+    assert "pitsense train --before" in " ".join(rt.health()["alarms"])
 
 
 def _fake_bench(n_races=6):

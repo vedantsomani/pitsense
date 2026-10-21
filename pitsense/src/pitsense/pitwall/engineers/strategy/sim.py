@@ -3,8 +3,9 @@
 Two parts, both on the same random numbers (common random numbers):
 
 * ``simulate_field``: every running car follows a sampled default strategy (stop timing from the rivals'
-  pit probabilities, then stint lengths from past races); cars queue behind slower cars and pass with a
-  chance that depends on the pace advantage; safety cars and VSCs bunch the field and cheapen stops.
+  pit probabilities, or with ``PARAMS["stop_cdf"]`` the models' laps-to-stop distribution, then stint lengths
+  from past races); cars queue behind slower cars and pass with a chance that depends on the pace advantage;
+  safety cars and VSCs bunch the field and cheapen stops.
 * ``evaluate_plans``: one focus car is replayed against those simulated opponents with each candidate plan
   (stop laps and tyres). Each lap only needs the nearest car ahead and behind (a sorted search), so
   hundreds of plans cost about the same as a few.
@@ -52,7 +53,16 @@ PARAMS = {
     "restart_gap": 2,  # green laps at least between two neutralisations
     "stint_scale": 1.12,  # stints drawn from past races are stretched by this factor (opponents' later stops)
     "hold_gain": 1.0,  # most a defending car can gain (s) per lap by holding a rival off
+    # switches added after the 2025 tuning; each default reproduces the earlier futures exactly (A/B them on 2025 only)
+    "stop_cdf": False,  # opponents' first stop from the models' laps-to-stop CDF (FieldIn.ps) where a car has one
+    "cdf_tail_scale": 1.0,  # stop-CDF mode: stints drawn past 8 laps from now are stretched by this
+    "common_pace_sd": 0.0,  # s: per-future pace offset of each compound's new sets, shared by every car
+    "common_deg_sd": 0.0,  # log-sd: per-future degradation multiplier of new sets, shared by every car
+    "slow_stops": False,  # slow-stop mixture: FieldIn.slow_p chance of FieldIn.slow_tab extra seconds (Priors.slow_stops)
+    "stack_s": 0.0,  # s the second car of a team stopping on the same lap waits (head.DOUBLE_STACK_S = 3; 0: off)
 }
+SLOW_P = 0.03  # pooled slow-stop chance per stop when no history has stationary times
+SLOW_TAB = (1.5, 2.5, 3.5, 5.0, 8.0, 12.0)  # pooled extra seconds of a slow stop (no history)
 
 
 @dataclass
@@ -99,6 +109,10 @@ class FieldIn:
     ref_pace: float = 90.0
     slots: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.int64))  # random-number slot per car
     n_slots: int = 0
+    ps: np.ndarray | None = None  # [C,5] models' P(stop within 1/2/3/5/8 laps); a NaN row: no value for that car
+    team: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.int64))  # team id per car (-1 unknown)
+    slow_p: np.ndarray | None = None  # [C] chance a stop is slow (None: SLOW_P)
+    slow_tab: tuple = ()  # sorted extra seconds of past slow stops (empty: SLOW_TAB)
 
     @property
     def R(self) -> int:
@@ -143,6 +157,10 @@ class Draws:
         self.u_dur = rng.random((S, Rt))[:, A:Rt]  # its length
         self.u_pull2 = cut(rng.random((S, n, N_EV)))
         self.status, self.sc_start = self._status(F, rng, force_sc)
+        # appended draws (_status takes none): the arrays above, and so every existing future, stay as they were
+        self.z_comp = rng.normal(0, 1, (S, 3))  # common pace offset per compound
+        self.z_cdeg = rng.normal(0, 1, S)  # common degradation multiplier
+        self.u_slow = cut(rng.random((S, n, K_STOPS, 2)))  # slow stop: whether, and how slow
 
     def _status(self, F: FieldIn, rng, force_sc):
         """Track status per simulated lap: 0 green, 1 VSC, 2 SC, 3 red flag (its lap: field bunched, free tyre
@@ -264,9 +282,12 @@ def pass_prob(delta: np.ndarray, table: tuple) -> np.ndarray:
     return np.where(delta > 3.0, PASS_TOP, p)
 
 
-def _loss_by_status(F: FieldIn, status_lap: np.ndarray) -> np.ndarray:
-    L = F.loss
-    return np.where(status_lap == 2, L["sc"], np.where(status_lap == 1, L["vsc"], L["green"]))
+def team_pairs(F: FieldIn) -> list[tuple[int, int]]:
+    """Index pairs of teammates in the field (cars with a known team id)."""
+    t = F.team
+    if len(t) != F.C:
+        return []
+    return [(i, j) for i in range(F.C) for j in range(i + 1, F.C) if t[i] >= 0 and t[i] == t[j]]
 
 
 def _cliff_lap(F: FieldIn, D: Draws, c: int, age: np.ndarray, cliff_age: np.ndarray) -> np.ndarray:
@@ -305,6 +326,8 @@ def lap_times_for(F: FieldIn, D: Draws, c: int, stop_lap: np.ndarray, comp: np.n
     t0 = t0 + _cliff_lap(F, D, c, age[None, None, :], cur_cliff[None, :, None])
     m = (stop_lap[:, :, :, None] < lap[None, None, None, :]).sum(2)  # [P,S,R] number of stops done before each lap
     out = np.where(m == 0, t0, 0.0)
+    cps, cds = PARAMS["common_pace_sd"], PARAMS["common_deg_sd"]  # field-wide uncertainty of new sets (0: none)
+    dmn = dm * np.exp(cds * D.z_cdeg)[None, :, None] if cds else dm
     for k in range(min(K, K_STOPS)):
         sel = m == (k + 1)
         if not sel.any():
@@ -313,9 +336,11 @@ def lap_times_for(F: FieldIn, D: Draws, c: int, stop_lap: np.ndarray, comp: np.n
         cj = comp[:, :, k]  # [P,S]
         ag = lap[None, None, :] - sl  # age during lap; out-lap = 1
         fresh = F.fresh[c][cj]  # [P,S]
+        if cps:
+            fresh = fresh + cps * D.z_comp[np.arange(S)[None, :], cj]
         deg = F.degc[c][cj]
         ca = np.take_along_axis(new_cliff[None, :, :].repeat(Pn, 0), cj[:, :, None], 2)  # [P,S,1]
-        t = fresh[:, :, None] + deg[:, :, None] * dm * (ag - 2.0) - fuel * (lap[None, None, :] - F.fresh_ref[c])
+        t = fresh[:, :, None] + deg[:, :, None] * dmn * (ag - 2.0) - fuel * (lap[None, None, :] - F.fresh_ref[c])
         t = t + _cliff_lap(F, D, c, ag, ca)
         out = np.where(sel, t, out)
     return out + lvl + noise
@@ -346,6 +371,32 @@ def _empirical(F: FieldIn, comp: np.ndarray, min_len: np.ndarray, u: np.ndarray,
     return out
 
 
+CDF_KNOTS = np.array([0.0, 1.0, 2.0, 3.0, 5.0, 8.0])  # laps from now at which FieldIn.ps gives P(stop within)
+
+
+def _cdf_first_stop(F: FieldIn, D: Draws) -> np.ndarray:
+    """First in-lap [S,C] by inverting each car's laps-to-stop CDF (``F.ps``, linear between the knots, rounded up);
+    past 8 laps a past stint of the current compound that lasts 9+ laps from now (``cdf_tail_scale``). Cars without
+    a CDF get garbage here (the caller keeps their hazard path)."""
+    S, C, A = D.S, F.C, F.A
+    q = np.maximum.accumulate(np.clip(np.nan_to_num(F.ps, nan=0.0), 0.0, 0.995), axis=1)  # [C,5]
+    q = np.concatenate([np.zeros((C, 1)), q], 1)  # [C,6] with the knot at 0 laps
+    u = D.u_stop
+    j = (u[:, :, None] >= q[None, :, 1:]).sum(2)  # knots passed: 0..5 (5: beyond 8 laps)
+    jj = np.minimum(j, 4)
+    lo = np.take_along_axis(np.broadcast_to(q, (S, C, 6)), jj[:, :, None], 2)[:, :, 0]
+    hi = np.take_along_axis(np.broadcast_to(q, (S, C, 6)), jj[:, :, None] + 1, 2)[:, :, 0]
+    klo, khi = CDF_KNOTS[jj], CDF_KNOTS[jj + 1]
+    k = np.ceil(klo + (khi - klo) * (u - lo) / np.maximum(hi - lo, 1e-9))
+    k = np.clip(k, klo + 1, khi).astype(np.int64)
+    cur_c = np.broadcast_to(F.comp0[None, :], (S, C))
+    ml = np.broadcast_to(F.stint_age[None, :] + 9.0, (S, C))
+    length = _empirical(F, cur_c, ml, D.u_after[:, :, 0], D.u_open[:, :, 0])
+    off = np.maximum(9, (length * PARAMS["cdf_tail_scale"] - F.stint_age[None, :]).astype(np.int64))
+    tail = np.where(length >= NOSTOP, NOSTOP, A + off)
+    return np.where(j >= 5, tail, A + k)
+
+
 def sample_schedules(F: FieldIn, D: Draws):
     """Opponents' (and baseline) stop plan: stop_lap [S,C,K] (absolute in-lap, NOSTOP if none), comp [S,C,K]."""
     S, C, R, A, total = D.S, F.C, F.R, F.A, F.total
@@ -366,6 +417,8 @@ def sample_schedules(F: FieldIn, D: Draws):
     length = _empirical(F, cur_c, ml, D.u_after[:, :, 0], D.u_open[:, :, 0])
     later = np.where(length >= NOSTOP, NOSTOP, A + (length * PARAMS["stint_scale"] - F.stint_age[None, :]).astype(np.int64))
     s0 = np.where(beyond, later, first_in)
+    if PARAMS["stop_cdf"] and F.ps is not None and len(F.ps) == C:
+        s0 = np.where(np.isfinite(F.ps).all(1)[None, :], _cdf_first_stop(F, D), s0)
     # safety car / VSC: cars due to stop soon come in (each neutralisation in turn; red flags are free changes)
     in_prog = bool(F.sc_now)
     win = PARAMS["sc_pull_window"]

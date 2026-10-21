@@ -23,6 +23,7 @@ Pickle files are code: only load bundles you trained yourself.
 
 from __future__ import annotations
 
+import logging
 import pickle
 import subprocess
 import warnings
@@ -33,10 +34,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .asof import assert_trained_before
+from .asof import LeakageError, assert_trained_before
 from .bench.evaluate import RACE_SPAN
 from .bench.features import FEATURE_VERSION
-from .bench.metrics import binary_scores, position_scores, regression_scores
+from .bench.metrics import binary_scores, multiclass_scores, position_scores, regression_scores
 from .bench.tasks import Task
 from .config import data_dir
 
@@ -54,6 +55,7 @@ BEST_MODEL: dict[str, str] = {
 }
 
 _SCORERS = {"binary": binary_scores, "position": position_scores, "regression": regression_scores}
+log = logging.getLogger(__name__)
 
 
 def models_dir() -> Path:
@@ -79,6 +81,11 @@ class TrainedBundle:
     models: dict[str, object] = field(default_factory=dict)  # task name -> fitted model
     metrics: dict[str, dict] = field(default_factory=dict)  # task name -> {model, kind, holdout_races, scores}
     targets: dict[str, str] = field(default_factory=dict)  # task name -> y_* column
+    features_hash: str | None = None  # bench.features.features_hash() at train time; None = not recorded
+    kinds: dict[str, str] = field(default_factory=dict)  # task name -> task kind
+
+    def __setstate__(self, state: dict) -> None:  # bundles pickled before a field existed get its default
+        self.__dict__.update({"features_hash": None, "kinds": {}, **state})
 
     def check_for(self, race_start_utc: datetime) -> "TrainedBundle":
         assert_trained_before([self.train_end_utc], race_start_utc)
@@ -91,7 +98,7 @@ class TrainedBundle:
         lines = [f"bundle {self.feature_version} @ {self.git_commit}: {len(self.trained_on)} races, "
                  f"training ends {self.train_end_utc:%Y-%m-%d %H:%M}Z, cutoff {self.cutoff_utc:%Y-%m-%d %H:%M}Z"]
         for task, m in self.metrics.items():
-            key = {"binary": "log_loss", "survival": "ibs"}.get(m.get("kind"), "mae")
+            key = m.get("primary") or {"binary": "log_loss", "multiclass": "log_loss", "survival": "ibs"}.get(m.get("kind"), "mae")
             lines.append(f"  {task:<20} {m['model']:<14} holdout {key} {m['scores'].get(key, float('nan')):.4f}"
                          f" (n={m['scores'].get('n', 0)})")
         return "\n".join(lines)
@@ -101,6 +108,15 @@ def _as_utc(x) -> datetime:
     ts = pd.Timestamp(x)
     ts = ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
     return ts.to_pydatetime()
+
+
+def current_features_hash() -> str | None:
+    """``bench.features.features_hash()``, or None while that does not exist."""
+    try:
+        from .bench.features import features_hash
+    except ImportError:
+        return None
+    return features_hash()
 
 
 def _pick(task: Task, choices: dict[str, str]):
@@ -126,7 +142,7 @@ def train_bundle(df: pd.DataFrame, cutoff_utc, *, tasks: list[Task] | None = Non
     train_end = (train["start_utc"].max() + RACE_SPAN).to_pydatetime()
     assert_trained_before([train_end], cutoff)
     races = train[["race_id", "start_utc"]].drop_duplicates().sort_values("start_utc")["race_id"].tolist()
-    bundle = TrainedBundle(train_end, cutoff, tuple(races), FEATURE_VERSION, _git_commit())
+    bundle = TrainedBundle(train_end, cutoff, tuple(races), FEATURE_VERSION, _git_commit(), features_hash=current_features_hash())
     for task in tasks if tasks is not None else registry.tasks(horizons=(1, 3)):
         if not task.models:
             continue
@@ -134,12 +150,13 @@ def train_bundle(df: pd.DataFrame, cutoff_utc, *, tasks: list[Task] | None = Non
         data = task.select(train)
         bundle.models[task.name] = cls().fit(data, task.target)
         bundle.targets[task.name] = task.target
+        bundle.kinds[task.name] = task.kind
         bundle.metrics[task.name] = _holdout(task, cls, data, races, holdout)
     return bundle
 
 
 def _holdout(task: Task, cls, data: pd.DataFrame, races: list[str], holdout: int) -> dict:
-    out = {"model": cls.name, "kind": task.kind, "holdout_races": [], "scores": {}}
+    out = {"model": cls.name, "kind": task.kind, "primary": task.metric, "holdout_races": [], "scores": {}}
     if holdout and len(races) > holdout + 1:
         hold = races[-holdout:]
         fit, test = data[~data.race_id.isin(hold)], data[data.race_id.isin(hold)]
@@ -152,6 +169,8 @@ def _holdout(task: Task, cls, data: pd.DataFrame, races: list[str], holdout: int
                 from .bench.laps_to_stop import survival_scores
 
                 out["scores"] = survival_scores(test, np.asarray(pred, float))
+            elif task.kind == "multiclass":  # [n, C] probabilities in task.classes order
+                out["scores"] = multiclass_scores(test[task.target].to_numpy(object), np.asarray(pred, float), task.classes)
             else:
                 out["scores"] = _SCORERS[task.kind](test[task.target].to_numpy(float), np.asarray(pred, float))
     return out
@@ -171,12 +190,17 @@ def save_bundle(bundle: TrainedBundle, path: Path | None = None) -> Path:
 
 
 def load_bundle(path: Path, race_start_utc: datetime | None = None) -> TrainedBundle:
-    """Load a bundle; with ``race_start_utc`` refuse it unless it was trained before that race."""
+    """Load a bundle; with ``race_start_utc`` refuse it unless it was trained before that race.
+    Refuse it too if it recorded a features hash that differs from the current feature columns."""
     bundle = pickle.loads(Path(path).read_bytes())
     if not isinstance(bundle, TrainedBundle):
         raise TypeError(f"{path} is not a TrainedBundle")
     if race_start_utc is not None:
         bundle.check_for(race_start_utc)
+    now = current_features_hash()
+    if bundle.features_hash and now and bundle.features_hash != now:
+        raise ValueError(f"{path} was trained on feature columns {bundle.features_hash}, this code builds {now}; "
+                         "retrain it with `pitsense train`")
     return bundle
 
 
@@ -186,9 +210,15 @@ def latest_bundle_for(race_start_utc: datetime, folder: Path | None = None) -> T
     for p in sorted((folder or models_dir()).glob("*.pkl")):
         try:
             b = load_bundle(p, race_start_utc)
-        except Exception:
+        except LeakageError:
+            continue  # expected when replaying a race before this bundle's training ended
+        except Exception as exc:
+            log.warning("cannot load model bundle %s: %s: %s", p, type(exc).__name__, exc)
             continue
-        if b.feature_version == FEATURE_VERSION and (best is None or b.train_end_utc > best.train_end_utc):
+        if b.feature_version != FEATURE_VERSION:
+            log.warning("model bundle %s uses features %s; expected %s", p, b.feature_version, FEATURE_VERSION)
+            continue
+        if best is None or b.train_end_utc > best.train_end_utc:
             best = b
     return best
 

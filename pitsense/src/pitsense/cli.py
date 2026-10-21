@@ -303,7 +303,7 @@ def cmd_import_live(a) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="pitsense", description="Leakage-safe F1 strategy engine and benchmark.")
-    p.add_argument("--data", help="data folder (default ./data or $PITSENSE_DATA)")
+    p.add_argument("--data", help="data folder (default: checkout's data folder, otherwise ./data; PITSENSE_DATA overrides)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("list", help="list a season's races (✓ = downloaded)")

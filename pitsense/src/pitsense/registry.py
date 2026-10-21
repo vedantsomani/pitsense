@@ -82,6 +82,7 @@ COMMANDS: list[str] = [
     "pitsense.bench.quali:add_commands",
     "pitsense.reports:add_commands",
     "pitsense.bench.report_all:add_commands",
+    "pitsense.bench.compare:add_commands",
 ]
 
 

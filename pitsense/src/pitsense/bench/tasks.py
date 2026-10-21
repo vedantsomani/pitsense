@@ -12,19 +12,27 @@ from typing import Any, Callable
 
 import pandas as pd
 
-KINDS = ("binary", "position", "regression", "survival")
+KINDS = ("binary", "position", "regression", "survival", "multiclass")
+# primary metric by kind (leaderboard sort, bundle holdout); a Task can override it with ``primary``
+PRIMARY = {"binary": "log_loss", "position": "mae", "regression": "mae", "survival": "ibs", "multiclass": "log_loss"}
 
 
 @dataclass(frozen=True)
 class Task:
     name: str  # also the report file names: predictions_<name>.parquet, per_race_<name>.csv
-    kind: str  # binary | position | regression (picks the scorer)
+    kind: str  # one of KINDS (picks the scorer); survival needs a custom ``evaluate``
     target: str  # a y_* column
     select: Callable[[pd.DataFrame], pd.DataFrame]  # the decision rows this task is scored on
     models: tuple[type, ...] = ()  # the first one is the reference baseline
     keep: tuple[str, ...] = ()  # extra columns copied into the predictions file
     # custom evaluation: f(df, *, test_year, min_train_races) -> EvalResult
     evaluate: Callable[..., Any] | None = None
+    classes: tuple[str, ...] = ()  # multiclass: target class names, in the order of predict()'s probability columns
+    primary: str = ""  # primary metric; "" = PRIMARY[kind]
+
+    @property
+    def metric(self) -> str:
+        return self.primary or PRIMARY.get(self.kind, "")
 
 
 def lap_end_rows(df: pd.DataFrame) -> pd.DataFrame:

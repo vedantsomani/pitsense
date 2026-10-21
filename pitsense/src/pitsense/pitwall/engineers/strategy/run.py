@@ -7,8 +7,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from .sim import (
-    FOLLOW_S, K_STOPS, OFF, PARAMS, PLACEHOLDER, RETIRED, SC_CAP_S, SC_LAP_FACTOR, VSC_LAP_FACTOR,
-    Draws, FieldIn, cliff_ages, lap_times_for, pass_prob, red_tyres, sample_schedules,
+    FOLLOW_S, K_STOPS, OFF, PARAMS, PLACEHOLDER, RETIRED, SC_CAP_S, SC_LAP_FACTOR, SLOW_P, SLOW_TAB, VSC_LAP_FACTOR,
+    Draws, FieldIn, cliff_ages, lap_times_for, pass_prob, red_tyres, sample_schedules, team_pairs,
 )
 
 
@@ -20,12 +20,22 @@ def _loss_by_status(F: FieldIn, status_lap: np.ndarray) -> np.ndarray:
     return np.where(status_lap >= 2, L["sc"], np.where(status_lap == 1, L["vsc"], L["green"]))
 
 
-def _stop_amount(F: FieldIn, st: np.ndarray, z: np.ndarray, off) -> np.ndarray:
-    """Time a stop adds at its in-lap by track status (a red flag's tyre change is free)."""
+def _stop_amount(F: FieldIn, st: np.ndarray, z: np.ndarray, off, u: np.ndarray | None = None, p=None) -> np.ndarray:
+    """Time a stop adds at its in-lap by track status (a red flag's tyre change is free). With ``PARAMS["slow_stops"]``
+    a stop is slow with chance ``p`` (``u[..., 0]``) and then adds a past slow stop's extra time (``u[..., 1]``)."""
     P = PARAMS
     extra = np.where(st == 0, P["stop_extra_s"], P["stop_extra_neutral_s"])
     amt = np.maximum(_loss_by_status(F, st) + F.loss["sd"] * np.where(st == 0, 1.0, 0.6) * z + off + extra, 3.0)
+    if P["slow_stops"] and u is not None:
+        tab = np.asarray(F.slow_tab or SLOW_TAB, dtype=float)
+        p = SLOW_P if p is None else p
+        pick = tab[np.minimum((u[..., 1] * len(tab)).astype(int), len(tab) - 1)]
+        amt = amt + np.where(u[..., 0] < p, pick, 0.0)
     return np.where(st == 3, 0.0, amt)
+
+
+def _slow_p(F: FieldIn):
+    return None if F.slow_p is None or len(F.slow_p) != F.C else F.slow_p
 
 
 @dataclass
@@ -49,24 +59,28 @@ def _pit_losses(F: FieldIn, D: Draws, stop: np.ndarray, c: int | None = None) ->
         sidx = np.broadcast_to(np.arange(S)[:, None], (S, Cn))
         cidx = np.broadcast_to(np.arange(Cn)[None, :], (S, Cn))
         off = F.team_off[None, :]
+        sp = _slow_p(F)
+        sp = None if sp is None else sp[None, :]
         for k in range(K_STOPS):
             li = stop[:, :, k] - (A + 1)
             ok = (li >= 0) & (li < R)
             lis = np.clip(li, 0, R - 1)
             st = np.take_along_axis(D.status, lis, 1)
-            amt = _stop_amount(F, st, D.z_pit[:, :, k], off)
+            amt = _stop_amount(F, st, D.z_pit[:, :, k], off, D.u_slow[:, :, k], sp)
             np.add.at(loss, (sidx[ok], cidx[ok], lis[ok]), amt[ok])
         return loss
     P = stop.shape[0]
     loss = np.zeros((P, S, R))
     pidx = np.broadcast_to(np.arange(P)[:, None], (P, S))
     sidx = np.broadcast_to(np.arange(S)[None, :], (P, S))
+    sp = _slow_p(F)
     for k in range(K_STOPS):
         li = stop[:, :, k] - (A + 1)
         ok = (li >= 0) & (li < R)
         lis = np.clip(li, 0, R - 1)
         st = D.status[sidx, lis]
-        amt = _stop_amount(F, st, D.z_pit[None, :, c, k], F.team_off[c])
+        us = D.u_slow[None, :, c, k]
+        amt = _stop_amount(F, st, D.z_pit[None, :, c, k], F.team_off[c], us, None if sp is None else sp[c])
         np.add.at(loss, (pidx[ok], sidx[ok], lis[ok]), amt[ok])
     return loss
 
@@ -86,8 +100,15 @@ def simulate_field(F: FieldIn, D: Draws, stop: np.ndarray | None = None, comp: n
     cum[:, :, 0] = F.x0[None, :]
     cur = np.broadcast_to(F.x0[None, :], (S, C)).copy()
     raw: dict = {}
+    stack, pairs = PARAMS["stack_s"], team_pairs(F)
     for l in range(R):
         st = D.status[:, l]
+        if stack and pairs:  # teammates stopping on the same lap: the one behind on the road waits for the first
+            for i, j in pairs:
+                both = (loss[:, i, l] > 0) & (loss[:, j, l] > 0)
+                jb = cur[:, j] > cur[:, i]
+                loss[:, j, l] += stack * (both & jb)
+                loss[:, i, l] += stack * (both & ~jb)
         green, sc = st == 0, st >= 2
         free = np.where(st[:, None] > 0, sc_t[st][:, None], lt[:, :, l])
         order = np.argsort(cur, axis=1, kind="stable")
@@ -190,6 +211,11 @@ def evaluate_plans(F: FieldIn, D: Draws, run: FieldRun, c: int, stop_lap: np.nda
     air = F.air * PARAMS["air_scale"]
     ours = np.full((Pn, S), F.x0[c])
     hold = PARAMS["hold_gain"]
+    stack = PARAMS["stack_s"]
+    mate = next((j if i == c else i for i, j in team_pairs(F) if c in (i, j)), None) if stack else None
+    if mate is not None:  # laps on which the teammate (its simulated schedule) stops, red flags excluded
+        lap_abs = F.A + 1 + np.arange(R)
+        mate_in = (run.stop[:S, mate, :, None] == lap_abs[None, None, :]).any(1) & (D.status[:S, :R] != 3)
     for l in range(R):
         st = D.status[:S, l]
         sp, nw = sp_all[l], nw_all[l]
@@ -201,6 +227,8 @@ def evaluate_plans(F: FieldIn, D: Draws, run: FieldRun, c: int, stop_lap: np.nda
         b_prev, b_new = sp[si, ib], nw[si, ib]
         hasB = (k < C) & (b_prev < RETIRED / 2)
         lo = ploss[:, :, l]
+        if mate is not None:  # double stack: we wait when the teammate, ahead on the road, stops on the same lap
+            lo = lo + stack * ((lo > 0) & mate_in[None, :, l] & (cum[:, mate, l][None, :] < ours))
         free = np.where(st[None, :] > 0, sc_t[st][None, :], tfree[:, :, l])
         arrive = ours + free
         total = arrive + lo
@@ -251,3 +279,4 @@ class _Slice:
         self.status, self.z_pit = D.status[:S], D.z_pit[:S]
         self.z_cliff, self.u_cliff = D.z_cliff[:S], D.u_cliff[:S]
         self.red_lap = D.red_lap[:S]
+        self.z_comp, self.z_cdeg, self.u_slow = D.z_comp[:S], D.z_cdeg[:S], D.u_slow[:S]

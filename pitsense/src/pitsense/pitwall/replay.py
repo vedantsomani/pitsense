@@ -27,7 +27,7 @@ from ..state import RaceState
 RUNTIME_ATTRS = (
     "session_info", "calls_log", "alerts_log", "inferred_order", "_feed_positions", "observe_errors",
     "snapshot_errors", "_decided_t", "_decided_lap", "_sent_t", "_last_calls", "_last_call_info", "changes", "radio", "wall_msgs", "_wall_id",
-    "track", "_track_done", "_pos_t", "positions", "_radio_lap", "_radio_list", "_radio_sig", "_seen_alerts",
+    "track", "_track_done", "_live_track_lap", "_pos_t", "positions", "_radio_lap", "_radio_list", "_radio_sig", "_seen_alerts",
     "_wall_quali", "n_events", "n_snapshots", "latest", "latest_bytes", "_prev_lap", "_last_alarms",
 )
 

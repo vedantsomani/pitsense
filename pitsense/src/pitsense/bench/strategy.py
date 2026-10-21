@@ -6,18 +6,32 @@ Three tasks, each with its own ``evaluate`` (they replay races and run the simul
   (RPS, MAE of the expected position, calibration of top-3 / top-10) against the current position and a
   pace extrapolation.
 * ``strategy_nextstop``: laps until the next stop, against the rivals hazard.
-* ``strategy_calls``: the head's BOX / PREPARE_BOX calls for the race's top-5 finishers against their real
-  stops (precision, recall, BOX with no stop after it), scored with the runtime's ``shadow_score``.
+* ``strategy_calls``: the head's calls for the focus cars against their real stops: ``callscore.call_metrics``
+  (per-action precision, recall split green / SC-VSC, false calls per race, BOX timing error, stay-out accuracy,
+  90 % race-bootstrap intervals) next to the runtime's legacy ``shadow_score``.
 
-One replay per race serves all three; results are cached in ``data/scratch`` per year and setting.
+Populations (read them before comparing numbers):
+
+* calls: focus = the grid top 4 (``focus="grid"``, default: a pre-race fact, and <= 4 cars keeps the pit wall in its
+  full mode like the live team wall and ``bench.decision``). ``focus="top5"`` is the older top-5 *finishers* set
+  (selected on the result, light mode: kept only for continuity with earlier numbers); ``every=True`` all
+  classified cars.
+* finish: classified cars only (>= 90 % distance); retirements are not forecast targets.
+* next stop: classified cars with a later stop are scored; classified cars that ran to the flag on their set are
+  right-censored (counted as ``censored``, not scored); retired cars are left out.
+
+One replay per race serves all three; results are cached in ``data/scratch`` per year, setting and a digest of the
+code, SETTINGS / PARAMS, ``history.json`` and the models bundle (``cache_digest``), so an edit never reuses old results.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import pickle
 import time
 from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -33,6 +47,7 @@ from ..pitwall.runtime import shadow_score
 from ..pitwall.types import TeamConfig
 from ..pitwall.wall import PitWall
 from ..state import RaceState
+from . import callscore
 from .evaluate import EvalResult
 from .metrics import calibration_table
 from .tasks import Task
@@ -68,14 +83,63 @@ def _rivals_next(rv: dict, A: int, stint_age: float) -> float:
     return A + max(6.0, typ - stint_age)
 
 
+_PKG = Path(__file__).resolve().parents[1]  # src/pitsense
+
+
+def _file_sig(path: Path) -> str:
+    try:
+        st = path.stat()
+        return f"{path.name}:{st.st_size}:{st.st_mtime_ns}"
+    except OSError:
+        return f"{path.name}:-"
+
+
+def _digest(parts) -> str:
+    return hashlib.sha1(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()[:10]
+
+
+def code_digest(*rel: str) -> str:
+    """Digest of the source files under ``src/pitsense`` (a folder: every .py below it)."""
+    h = hashlib.sha1()
+    for r in rel:
+        q = _PKG / r
+        for f in sorted(q.rglob("*.py")) if q.is_dir() else [q]:
+            h.update(f.relative_to(_PKG).as_posix().encode())
+            h.update(f.read_bytes() if f.exists() else b"")
+    return h.hexdigest()[:10]
+
+
+SIM_CODE = ("pitwall", "state.py", "pitloss.py", "weekend.py", "asof.py", "bench/history.py", "bench/strategy.py")
+
+
+def bundle_digest() -> str:
+    """What the benchmark's models bundle depends on: feature version and columns, the bench files, the training code."""
+    from . import features as FT
+    from .dataset import MANIFEST
+
+    fh = getattr(FT, "features_hash", None)
+    return _digest([FT.FEATURE_VERSION, fh() if fh else "", _file_sig(bench_dir() / FT.FEATURE_VERSION / MANIFEST),
+                    code_digest("modelstore.py", "registry.py", "bench/models.py", "bench/tasks.py")])
+
+
+def cache_digest(models: bool = True) -> str:
+    """SETTINGS + PARAMS + simulator / pit-wall code + ``history.json`` (+ the bundle's digest with ``models``)."""
+    from ..pitwall.engineers.strategy.sim import PARAMS
+
+    return _digest([analysis.SETTINGS, PARAMS, code_digest(*SIM_CODE), _file_sig(bench_dir() / "history.json"),
+                    bundle_digest() if models else ""])
+
+
 def bundle_for_year(year: int):
     """The cross-race models a pit wall would have at the start of ``year``: trained on every race that ended
-    before the year's first race (cached in ``data/models``), so no test race is seen by its own model."""
+    before the year's first race, so no test race is seen by its own model. Cached in ``data/models/strategy_bench``
+    per year and ``bundle_digest`` (a subfolder: the live wall's ``latest_bundle_for`` never picks it up)."""
     from .. import modelstore
     from .dataset import load_bench
 
     first = min(r.start_utc for r in downloaded_sessions() if r.year == year and r.session_name == "Race")
-    path = data_dir() / "models" / f"strategy_bench_{year}.pkl"
+    path = data_dir() / "models" / "strategy_bench" / f"{year}_{bundle_digest()}.pkl"
+    path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         return modelstore.load_bundle(path, first)
     bundle = modelstore.train_bundle(load_bench(), first, holdout=0)
@@ -130,11 +194,17 @@ def replay_calls(trace: list[dict], final: RaceState, top5, decide_fn, k: int = 
     return calls
 
 
+FOCUS = ("grid", "top5")
+
+
 def run_race(args) -> dict:
-    """Replay one race: forecasts at the anchors, head calls for the top-5 finishers."""
+    """Replay one race: forecasts at the anchors, head calls for the focus cars (grid top 4 by default)."""
+    from .decision import focus_from_grid
+
     slug, year, stride, S, calls_on = args[:5]
     use_models = bool(args[5]) if len(args) > 5 else False
     every = bool(args[6]) if len(args) > 6 else False  # every classified car, the pit wall's light mode (no team set)
+    mode = "every" if every else (args[7] if len(args) > 7 else "grid")
     ref = next(r for r in downloaded_sessions() if r.slug == slug)
     from . import history as H
 
@@ -147,7 +217,8 @@ def run_race(args) -> dict:
     total = final.total_laps or 0
     classified = [d for d in final.running_order() if d.running and d.laps >= 0.9 * total]
     y_pos = {d.number: d.position for d in classified}
-    top5 = tuple(d.number for d in (classified if every else classified[:5]))
+    # the scored cars ("top5" stays the key name for older readers)
+    top5 = tuple(d.number for d in (classified if every else classified[:5])) if mode != "grid" else focus_from_grid(final)
     ctx = Context.for_race(prior, ref.to_dict(), history=hist, race_start_utc=ref.start_utc,
                            team=TeamConfig(cars=() if every else top5 if calls_on else ()),
                            models=bundle_for_year(year) if use_models else None)
@@ -192,7 +263,7 @@ def run_race(args) -> dict:
                             calls.append({"kind": "call", "t": c.t, "lap": state.current_lap, "car_lap": lap.lap + 1,
                                           "car": c.car, "action": c.action, "compound": c.compound,
                                           "confidence": c.confidence, "confidence_raw": c.confidence_raw})
-    res = {"slug": slug, "year": year, "top5": top5, "fc": fc_rows, "ns": ns_rows, "calls": calls,
+    res = {"slug": slug, "year": year, "top5": top5, "focus_mode": mode, "facts": callscore.race_facts(final), "fc": fc_rows, "ns": ns_rows, "calls": calls,
            "stops": {k: stops.get(k, []) for k in top5}, "trace": trace, "calls_s": t_calls / max(n_calls, 1)}
     if calls_on:
         res["shadow"] = shadow_score(calls, final, 2, set(top5))
@@ -223,13 +294,12 @@ def _forecast(wall, ctx, state, A, S, y_pos, stops, total, fc_rows, ns_rows, arg
                         "rps_now": _rps(_onehot(now_order[n]), y), "rps_pace": _rps(_onehot(pace_order[n]), y),
                         "now": now_order[n], "pace": pace_order[n]})
         nxt = [l for l in stops.get(n, []) if l > A]
-        if nxt:
-            s0 = run.stop[:, i, 0]
-            ok = s0 < NOSTOP
-            pred = float(np.median(s0[ok])) if ok.any() else float("nan")
-            rv = view.car("rivals", n)
-            base = _rivals_next(rv, A, F.stint_age[i])
-            ns_rows.append({"anchor": A, "car": n, "y": nxt[0], "sim": pred, "rivals": base, "p_stop": float(ok.mean())})
+        s0 = run.stop[:, i, 0]
+        ok = s0 < NOSTOP
+        pred = float(np.median(s0[ok])) if ok.any() else float("nan")
+        base = _rivals_next(view.car("rivals", n), A, F.stint_age[i])
+        ns_rows.append({"anchor": A, "car": n, "y": nxt[0] if nxt else None, "censored": not nxt, "sim": pred,
+                        "rivals": base, "p_stop": float(ok.mean())})  # censored: ran to the flag on this set
 
 
 # --------------------------------------------------------------------------- scoring
@@ -238,14 +308,19 @@ def _races(year: int):
 
 
 def collect(year: int, *, jobs: int = 3, stride: int = 2, S: int = 192, calls_on: bool = True, refresh: bool = False,
-            models: bool = True, every: bool = False, tag: str = "") -> list[dict]:
-    """Replay every race of ``year``. ``every``: calls for all classified cars (the pit wall's light mode) instead of the top 5."""
-    cache = data_dir() / "scratch" / f"strategy_{year}_{stride}_{S}_{int(calls_on)}{'_m' if models else ''}{'_all' if every else ''}{tag}.pkl"
+            models: bool = True, every: bool = False, tag: str = "", focus: str = "grid") -> list[dict]:
+    """Replay every race of ``year``. Calls for ``focus`` ("grid": grid top 4, full mode; "top5": the top-5 finishers,
+    the older outcome-selected set) or, with ``every``, all classified cars (the pit wall's light mode)."""
+    if focus not in FOCUS:
+        raise ValueError(f"focus must be one of {FOCUS}")
+    fk = "_all" if every else f"_{focus}"
+    name = f"strategy_{year}_{stride}_{S}_{int(calls_on)}{'_m' if models else ''}{fk}{tag}_{cache_digest(models)}.pkl"
+    cache = data_dir() / "scratch" / name
     if cache.exists() and not refresh:
         return pickle.loads(cache.read_bytes())
     if models:
         bundle_for_year(year)  # train once here, not in every worker
-    jobs_ = [(r.slug, year, stride, S, calls_on, models, every) for r in _races(year)]
+    jobs_ = [(r.slug, year, stride, S, calls_on, models, every, focus) for r in _races(year)]
     with ProcessPoolExecutor(max_workers=jobs) as ex:
         out = list(ex.map(run_race, jobs_))
     cache.parent.mkdir(parents=True, exist_ok=True)
@@ -278,8 +353,12 @@ def _finish(df, test_year, min_train_races, **kw) -> EvalResult:
 
 def _nextstop(df, test_year, min_train_races, **kw) -> EvalResult:
     res = collect(test_year, **kw)
-    d = _frame(res, "ns").dropna(subset=["sim"])
-    board = pd.DataFrame([{"model": n, "n": len(d), "mae_laps": (d[c] - d.y).abs().mean(),
+    d = _frame(res, "ns")
+    cens = d["censored"].fillna(False).astype(bool) if "censored" in d else pd.Series(False, index=d.index)
+    n_cens = int(cens.sum())
+    d = d[~cens].dropna(subset=["sim", "y"])
+    d = d.assign(y=d.y.astype(float))
+    board = pd.DataFrame([{"model": n, "n": len(d), "censored": n_cens, "mae_laps": (d[c] - d.y).abs().mean(),
                            "within_2": float(((d[c] - d.y).abs() <= 2).mean()), "bias": (d[c] - d.y).mean()}
                           for n, c in (("sim", "sim"), ("rivals_hazard", "rivals"))]).sort_values("mae_laps").reset_index(drop=True)
     per = d.groupby("race_id").apply(lambda g: pd.Series({"sim": (g.sim - g.y).abs().mean(), "rivals_hazard": (g.rivals - g.y).abs().mean()}),

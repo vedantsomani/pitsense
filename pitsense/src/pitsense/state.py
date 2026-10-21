@@ -119,6 +119,7 @@ class DriverState:
     last_out_lap: int | None = None
     pit_in_t: float | None = None
     pit_out_t: float | None = None
+    timing_t: float | None = None  # last TimingData update for this car (feed staleness)
 
     @property
     def running(self) -> bool:
@@ -205,8 +206,10 @@ class RaceState:
         self.started_t: float | None = None
         self.finished_t: float | None = None
         self.weather: dict[str, float | None] = {}
+        self.weather_t: float | None = None  # when WeatherData last arrived
         self.rc: list[RCMessage] = []
         self.laps: list[LapRecord] = []
+        self.timed_laps: list[LapRecord] = []  # each time a lap's time is set (in order), incl. late ones
         self.pit_stops: list[PitStopRecord] = []
         self.pit_events: list[PitEvent] = []
         self.new_laps: list[LapRecord] = []  # laps completed by the last applied event
@@ -325,6 +328,7 @@ class RaceState:
                 s.add(code)
 
     def _on_WeatherData(self, data: dict, e: Event) -> None:
+        self.weather_t = e.t
         for key, value in data.items():
             self.weather[key] = _to_float(value)
 
@@ -438,6 +442,7 @@ class RaceState:
             if not isinstance(upd, dict):
                 continue
             d = self.driver(num)
+            d.timing_t = e.t
             if "Position" in upd:
                 d.position = _to_int(upd["Position"])
             if "GapToLeader" in upd:
@@ -488,6 +493,7 @@ class RaceState:
                             # The feed only sends changed values: a lap time equal to the
                             # previous one is omitted. Assume unchanged; a later value overrides.
                             rec.lap_time, rec.lap_time_t, rec.lap_time_inferred = d.last_lap_time, e.t, True
+                            self.timed_laps.append(rec)
             if has_time:
                 value = parse_lap_time(llt["Value"])
                 d.last_lap_time = value
@@ -498,6 +504,7 @@ class RaceState:
                 if (pending is not None and (pending.lap_time is None or pending.lap_time_inferred)
                         and e.t - pending.t_end <= value / 2):
                     pending.lap_time, pending.lap_time_t, pending.lap_time_inferred = value, e.t, False
+                    self.timed_laps.append(pending)
             blt = upd.get("BestLapTime")
             if isinstance(blt, dict) and "Value" in blt:
                 value = parse_lap_time(blt["Value"])

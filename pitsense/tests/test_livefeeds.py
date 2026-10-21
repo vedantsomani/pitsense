@@ -84,11 +84,20 @@ def test_outline_built_from_positions_after_two_laps(data, tmp_path):
     rec = tmp_path / "rec.jsonl"
     write_recording(rec, radio=False, circle=True)
     rt = run(rec, False)
-    rt._live_track_wall = 0.0
-    rt._live_track()
     t = rt.track
     assert t and t["provisional"] and len(t["x"]) == 400
     assert max(t["x"]) == pytest.approx(5000, rel=0.05) and max(t["y"]) == pytest.approx(3000, rel=0.05)
+
+
+def test_recording_replay_uses_scheduled_session_start_for_models(tmp_path):
+    from pitsense.live import load_recording
+    from pitsense.pitwall.sources import ReplaySource
+    from pitsense.trackmap import session_circuit
+
+    rec = tmp_path / "rec.jsonl"
+    write_recording(rec, radio=False)
+    src = ReplaySource(load_recording(rec), 0)
+    assert src.start_utc == session_circuit(INFO)[1]
 
 
 def test_session_info_deltas_merge(data, tmp_path):

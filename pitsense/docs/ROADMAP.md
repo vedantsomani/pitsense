@@ -1,5 +1,8 @@
 # Roadmap: from replay-good to race-day-real
 
+> **Sequenced plan (2026-10-21):** the open items below are now work packages with acceptance tests, agents and a
+> paper outline in [RESEARCH_PLAN.md](RESEARCH_PLAN.md). This file stays as the gap list; that file says what to do next.
+
 What stands between PitSense and a tool a real F1 strategy team would trust, ordered by impact.
 Each item names the gap, why it matters on a real pit wall, and how we would measure it.
 
@@ -10,7 +13,8 @@ Each item names the gap, why it matters on a real pit wall, and how we would mea
 | **Tyre sets left** (new/used, per compound) | Real plans are limited by sets in the garage | Done: `engineers/tyresets.py` builds each car's inventory from practice and qualifying; plans only use sets that exist |
 | **Practice long runs** | Teams know each compound's degradation before the race | Done: `practice.py` fits deg on long runs as the race-start prior |
 | **Fuel / energy and car damage** | Teams box for damage and manage energy; we only see lap times | Partly: the mechanics engineers flag power loss and slow cars; no unscheduled-stop hazard in the simulator yet |
-| **Pit-crew speed per team** | Stationary time varies by 0.5-1 s between teams | Open: per-team stationary-time priors from history |
+| **Pit-crew speed per team** | Stationary time varies by 0.5-1 s between teams | Open: per-team stationary-time priors from history (plan WP4) |
+| **Tyre state from telemetry** | Tyre age is a poor proxy; CarData and Position carry the loads that wear the tyre | Open: telemetry physics features, wear-driven cliff hazard (plan WP1, WP2) |
 
 ## 2. Simulator realism
 
@@ -19,7 +23,7 @@ difficulty per circuit, pit loss by track status, a risk setting (`--risk expect
 teammate double stack under green flag (`head.double_stack`), and wet races on their own simulator.
 
 Open, by value:
-- **Rivals that react:** a first model (the car ahead covers our undercut at its team's learnt rate,
+- **Rivals that react** (plan WP3)**:** a first model (the car ahead covers our undercut at its team's learnt rate,
   `analysis.rival_cover`) did not improve the 2026 calls and is off. Full reactions need opponent trajectories per
   candidate plan (today they are shared by every plan), and should be judged on decision value, not only on
   agreement with the team's real stops.
@@ -48,10 +52,10 @@ off the feed path (voice in its own thread, questions on a copy); replays decide
 health alarms; a token from `PITSENSE_TOKEN`.
 
 Open:
-- **Feed failover:** the recorder reconnects after drop-outs and a watchdog restarts it if it dies (backoff 5-60 s,
+- **Feed failover** (plan WP6)**:** the recorder reconnects after drop-outs and a watchdog restarts it if it dies (backoff 5-60 s,
   `recorder_restarts` in /api/health); still open: a second, independent live source.
 - **Latency budget:** a call within 1 s of the lap finishing (measure p95 on a live recording).
-- **Learning from the operator:** use rejected calls and their reasons to tune the head (today they are only graded).
+- **Learning from the operator** (plan WP5)**:** use rejected calls and their reasons to tune the head (today they are only graded).
 - **Multi-screen setup:** strategist, race engineer and mechanics views.
 
 ## 5. Frontend

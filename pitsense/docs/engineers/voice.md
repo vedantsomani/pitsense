@@ -20,6 +20,8 @@ Call + Snapshot --facts.py--> one-line input --backend--> text --guard.py--> ser
 | `api.py`, `cli.py` | `say`, `brief`, `answer`, `ask`; `pitsense voice train | eval | say` |
 | `tts.py` | `speak(text) -> wav` with Piper (optional) |
 
+**Next:** a 30B-class fine-tune (full-parameter on the college 8x H200 node, served by vLLM, guard in front) with 8B and 70B arms for a scaling curve: [RESEARCH_PLAN.md, WP7](../RESEARCH_PLAN.md).
+
 ## Facts and the guard
 
 The input is one deterministic line, e.g.

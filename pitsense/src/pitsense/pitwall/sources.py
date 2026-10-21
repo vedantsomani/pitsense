@@ -57,6 +57,12 @@ class ReplaySource(Source):
         self._anchor: tuple[float, float] | None = None  # (wall time, session time) the pacing is measured from
         self._t_pace = log_.start  # pacing begins here (LEAD_IN_S before the lights)
         for e in log_.events:
+            if self.start_utc is None and e.topic == "SessionInfo":
+                from ..trackmap import session_circuit
+
+                got = session_circuit(e.data)
+                if got is not None:
+                    self.start_utc = got[1]
             if e.topic == "SessionStatus" and isinstance(e.data, dict) and e.data.get("Status") == "Started":
                 self._t_pace = max(log_.start, e.t - LEAD_IN_S)
                 break

@@ -71,6 +71,29 @@ INDEX_YIELD_ABOVE = 5.0  # ...waits while the replay plays faster than this (x);
 
 
 # ----------------------------------------------------------------------------- runtime
+def _session_start(info: dict) -> datetime | None:
+    from ..trackmap import session_circuit
+
+    got = session_circuit(info)
+    return got[1] if got else None
+
+
+def session_meta(info: dict) -> dict:
+    """The archive-style meta (``SessionRef`` fields) a SessionInfo message names; {} until it names circuit and start."""
+    from ..trackmap import session_circuit
+
+    got = session_circuit(info)
+    if got is None:
+        return {}
+    key, start = got
+    m, c = info["Meeting"], info["Meeting"]["Circuit"]
+    out = {"year": start.year, "meeting_key": m.get("Key"), "meeting_name": m.get("Name"), "location": m.get("Location"),
+           "country": (m.get("Country") or {}).get("Name"), "circuit_key": key, "circuit": c.get("ShortName"),
+           "session_key": info.get("Key"), "session_name": info.get("Name"), "session_type": info.get("Type"),
+           "start_local": info.get("StartDate"), "gmt_offset": info.get("GmtOffset"), "path": info.get("Path")}
+    return {k: v for k, v in out.items() if v is not None}
+
+
 def _merge(into: dict, update: dict) -> None:
     """Deep-merge a SessionInfo delta into what we know (deltas carry only the changed fields)."""
     for k, v in update.items():
@@ -219,8 +242,7 @@ class PitWallRuntime:
         self.positions: dict = {}
         self.session_info: dict = {}  # SessionInfo merged over its messages: circuit, start, static path
         self.radio_worker = getattr(source, "radio", None)
-        self._live_track_wall = 0.0
-        self._live_track_tries = 0
+        self._live_track_lap = -1
         self._radio_lap: dict[str, int] = {}  # mp3 path -> leader lap when it was published
         self._radio_list: list[dict] = []
         self._radio_wall = 0.0
@@ -261,27 +283,43 @@ class PitWallRuntime:
 
         src = self.source
         start = src.start_utc
+        meta = dict(src.meta)
+        extra = session_meta(self.session_info) if src.ref is None else {}
+        if extra:  # live / followed: no archive ref, so the meta comes from the SessionInfo message
+            for k, v in extra.items():
+                meta.setdefault(k, v)
+            start = _session_start(self.session_info) or start
+        self._wall_enriched = bool(extra)
         history = self.history
         if history is None:
             path = bench_dir() / "history.json"
             history = H.load(path) if path.exists() else None
         prior = PitLossPrior()
-        if history is not None and src.ref is not None and start is not None:
-            prior = H.prior_for(history, src.ref.circuit_key, start)
+        circuit = src.ref.circuit_key if src.ref is not None else meta.get("circuit_key")
+        if history is not None and circuit is not None and start is not None:
+            prior = H.prior_for(history, circuit, start)
         models = None
+        self.model_info = {"loaded": False}
         if self.use_models is True and start is not None:
             try:
-                from ..modelstore import latest_bundle_for
+                from ..modelstore import latest_bundle_for, models_dir
 
                 models = latest_bundle_for(start)
+                if models is None:
+                    self.model_info["error"] = (
+                        f"No compatible bundle trained before {start.isoformat()} in {models_dir()}; "
+                        f"run: pitsense train --before {start.isoformat()}"
+                    )
             except Exception as exc:  # missing sklearn pickle, bad file ...
+                self.model_info["error"] = f"{type(exc).__name__}: {exc}"
                 log.warning("no model bundle: %s", exc)
+        elif self.use_models is True:
+            self.model_info["error"] = "Session start UTC is unknown; cannot safely select a model bundle"
         elif self.use_models not in (True, False, None):
             models = self.use_models  # an explicit bundle
         if models is not None:
             self.model_info = {"loaded": True, "cutoff_utc": str(models.cutoff_utc),
                                "train_end_utc": str(models.train_end_utc), "races": len(models.trained_on)}
-        meta = dict(src.meta)
         engineers = self.engineers
         self._wall_quali = self._is_quali()
         if self._wall_quali:  # qualifying: the race engineers have nothing to say
@@ -396,6 +434,13 @@ class PitWallRuntime:
                 _merge(self.session_info, e.data)
                 if self.wall is not None and not self._wall_quali and self._is_quali():
                     self._build_wall()  # a recording whose first message names the session
+                elif self.wall is not None and self.source.ref is None and not getattr(self, "_wall_enriched", False) \
+                        and session_meta(self.session_info):
+                    if state.started or state.current_lap > 1:
+                        log.warning("SessionInfo arrived after the start: the pit wall keeps the default meta and prior")
+                        self._wall_enriched = True  # warned once
+                    else:
+                        self._build_wall()  # year, circuit and the pit-loss prior, as the benchmark builds them
                 self._feed_radio(e)
             if e.topic in FEED_TOPICS:  # feeds never change the timing state: no engineers, no snapshot
                 if e.topic == "TeamRadio":
@@ -778,10 +823,10 @@ class PitWallRuntime:
 
     def _live_track(self) -> None:
         """No stored outline: build one from the cars' published positions once 2 laps are done (as-of)."""
-        now = time.monotonic()
-        if self.track is not None or self.state.current_lap < 3 or self._live_track_tries >= 20                 or now - self._live_track_wall < 10.0:
+        lap = self.state.current_lap
+        if self.track is not None or lap < 3 or lap == self._live_track_lap:
             return
-        self._live_track_wall, self._live_track_tries = now, self._live_track_tries + 1
+        self._live_track_lap = lap  # retry with each new lap, even in an accelerated replay
         try:
             from ..trackmap import live_outline
 
@@ -1094,7 +1139,8 @@ class PitWallRuntime:
                 alarms.append("RED: No strategy calls produced after 5 laps (may indicate strategy bug)")
 
         if self.use_models is True and not self.model_info.get("loaded"):
-            alarms.append("RED: Model bundle requested but not loaded")
+            detail = self.model_info.get("error")
+            alarms.append("RED: Model bundle requested but not loaded" + (f": {detail}" if detail else ""))
 
         quiet = getattr(self.source, "paused", False) or self.status in ("finished", "stopped")  # nothing is due
         if last_event_age is not None and last_event_age > 30 and not quiet:

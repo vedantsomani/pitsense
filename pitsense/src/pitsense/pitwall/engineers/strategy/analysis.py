@@ -17,7 +17,7 @@ from ...memory import is_clean
 from ...types import Plan, PlanStop
 from .priors import DRY, LIFE, Priors
 from .run import FieldRun, evaluate_plans, simulate_field
-from .sim import K_STOPS, NOSTOP, Draws, FieldIn
+from .sim import K_STOPS, NOSTOP, PARAMS, Draws, FieldIn
 from . import wetobs
 from .... import weekend
 
@@ -307,6 +307,12 @@ def build_field(state, view, memory, ctx, pri: Priors, A: int) -> tuple[FieldIn,
             done = [int(round(LIFE[c] * f)) for f in np.linspace(0.75, 1.3, 11)]
             opened = []
         F.stints.append((done, opened))
+    F.ps = np.array([(info.get("ps", {}).get(n) or (np.nan,) * 6)[:5] for n in names], dtype=float).reshape(C, 5)
+    teams = [str(getattr(state.drivers[n], "team", "") or "") for n in names]
+    tid = {t: i for i, t in enumerate(sorted(set(t for t in teams if t)))}
+    F.team = np.array([tid.get(t, -1) for t in teams], dtype=np.int64)
+    if PARAMS["slow_stops"]:
+        F.slow_p, F.slow_tab = pri.slow_stops(teams)
     allnum = sorted(state.drivers, key=lambda x: (int(x) if x.isdigit() else 999, x))
     slot = {n: i for i, n in enumerate(allnum)}
     F.slots = np.array([slot[n] for n in names], dtype=np.int64)

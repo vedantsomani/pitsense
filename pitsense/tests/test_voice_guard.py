@@ -154,6 +154,37 @@ def test_voice_serves_the_template_when_the_model_gets_a_relation_wrong():
     assert (r.source, r.fallback, r.text) == ("stub", False, "VER is 1.2 seconds ahead of LEC.")
 
 
+@pytest.mark.parametrize("out", ["We have 21.5 seconds of penalty to serve.", "A 21.5-second penalty is pending.",
+                                 "The penalty is 21.5 seconds."])
+def test_penalty_must_match_the_pending_penalty_not_another_input_number(out):
+    assert guard.fact_errors(INP, out) == ["penalty 21.5 is not pending"]
+    assert guard.fact_errors(INP, out.replace("21.5", "5")) == []
+
+
+def test_voice_rejects_expected_points_reported_as_a_penalty():
+    from pitsense.voice.api import Voice
+
+    f = dataclasses.replace(CALL, action="STAY_OUT", pen=None,
+                            reasons=(("other", None, "expected P2.5 18.9 points"),))
+    raw = "OK LEC, hold position, stay out, because we have 18.9 seconds of penalty to serve."
+    v = Voice(use_model=False)
+    v.backends = [Backend(raw)]
+    r = v.write(f, "radio")
+    assert r.source == "template" and r.fallback and r.text == composer.radio(f)
+    assert "penalty 18.9 is not pending" in r.errors
+
+
+@pytest.mark.parametrize("task,target", [("ask_gap", "1"), ("free", "what is the gap ahead")])
+def test_gap_answer_must_address_the_requested_neighbour(task, target):
+    from pitsense.voice.api import Voice
+
+    v = Voice(use_model=False)
+    v.backends = [Backend("The gap to NOR is 2.4 seconds, he is behind.")]
+    result = v.write(CALL, task, target)
+    assert result.source == "template" and result.fallback
+    assert "VER" in result.text and "gap answer is not about VER" in result.errors
+
+
 def test_odd_input_and_output_never_raise():
     odd = ("", "radio S000000", "radio S0 | AH | PA x | PB 3 | LAP 3 | ACT | CAR | R other ~ ", INP[:60], INP.replace(" | ", " |  | "))
     for inp in odd:
