@@ -215,10 +215,17 @@ def fetch_index(year: int, *, refresh: bool = False) -> list[SessionRef]:
         or (year >= datetime.now(timezone.utc).year and time.time() - cache.stat().st_mtime > 86400)
     )
     if stale:
-        got = _get_archive(f"{year}/Index.json")
-        if got is None:
+        try:
+            got = _get_archive(f"{year}/Index.json")
+        except Exception:
+            # the archive now answers 401 at times; a cached index is still good for finished races
+            if not cache.exists():
+                raise
+            got = None
+        if got is not None:
+            _save(cache, *got)
+        elif not cache.exists():
             raise RuntimeError(f"No archive index for {year}")
-        _save(cache, *got)
     data = json.loads(_decode(cache.read_bytes()))
 
     refs: list[SessionRef] = []
