@@ -1,0 +1,1531 @@
+{
+ "generated_utc": "2026-10-21T05:22:39Z",
+ "test_year": 2026,
+ "current": {
+  "data": {
+   "feature_version": "v0.1",
+   "races": 40,
+   "races_by_year": {
+    "2025": 24,
+    "2026": 16
+   },
+   "manifest_sha256": "ef5f71a5323d",
+   "history_sha256": "461f507944ff"
+  },
+  "config": {
+   "hash": "efdd6e6d50e4",
+   "SETTINGS": {
+    "rival_cover": false,
+    "S": 288,
+    "S1": 96,
+    "S_B": 160,
+    "keep": 14,
+    "tol_box": 0.3,
+    "tol_prep": 0.5,
+    "prep_laps": 2,
+    "gain_sc": 0.6,
+    "p_sc": 0.7,
+    "w_time": 0.001,
+    "lam_prior": 0.02,
+    "use_sc_prob": true,
+    "sc_alert_gain": 0.3,
+    "use_hazard": true,
+    "p1_box": 0.25,
+    "p3_box": 0.5,
+    "p3_prep": 0.2,
+    "p1_prep": 0.05,
+    "prep_near": null,
+    "use_stop_dist": true,
+    "q1_box": 0.2,
+    "q2_prep": 0.12,
+    "q1_prep": 0.1,
+    "hold": 0.7,
+    "use_wet_engine": true,
+    "tol_keep": 0.05,
+    "box_ttl": 2,
+    "box_cool": 3,
+    "box_q": 0.15,
+    "comp_tol": 0.1,
+    "comp_ttl": 5,
+    "sane_places": 6.0,
+    "sc_event": true,
+    "sc_window": 8,
+    "sc_tol": 0.5,
+    "sc_p8": 0.5,
+    "sw_min": 2,
+    "sw_share": 0.1,
+    "sw_delta_s": 1.0
+   },
+   "sim.PARAMS": {
+    "level_sd": 0.1,
+    "noise_sd": 0.2,
+    "deg_sd": 0.2,
+    "cliff_mult": 1.7,
+    "cliff_sd": 0.18,
+    "cliff_slope": 0.25,
+    "cliff_cap": 6.0,
+    "retire_rate": 0.0003,
+    "sc_pull": 0.85,
+    "vsc_pull": 0.45,
+    "sc_pull_window": 20,
+    "stop_extra_s": 3.0,
+    "stop_extra_neutral_s": 0.0,
+    "air_scale": 0.5,
+    "restart_gap": 2,
+    "stint_scale": 1.12,
+    "hold_gain": 1.0,
+    "stop_cdf": false,
+    "cdf_tail_scale": 1.0,
+    "common_pace_sd": 0.0,
+    "common_deg_sd": 0.0,
+    "slow_stops": false,
+    "stack_s": 0.0
+   }
+  },
+  "training_cutoff": "n/a (the stamp of this report itself)",
+  "git": {
+   "commit": "521b399954",
+   "dirty": true,
+   "dirty_files": [
+    "itsense/README.md"
+   ]
+  },
+  "run_utc": "2026-10-21T05:22:39Z"
+ },
+ "consistent": {
+  "data": true,
+  "config": true,
+  "data_hashes": [
+   "ef5f71a5323d"
+  ],
+  "config_hashes": [
+   "efdd6e6d50e4"
+  ]
+ },
+ "sources": {
+  "benchmark": {
+   "data": {
+    "feature_version": "v0.1",
+    "races": 40,
+    "races_by_year": {
+     "2025": 24,
+     "2026": 16
+    },
+    "manifest_sha256": "ef5f71a5323d",
+    "history_sha256": "461f507944ff"
+   },
+   "config": {
+    "hash": "efdd6e6d50e4",
+    "SETTINGS": {
+     "rival_cover": false,
+     "S": 288,
+     "S1": 96,
+     "S_B": 160,
+     "keep": 14,
+     "tol_box": 0.3,
+     "tol_prep": 0.5,
+     "prep_laps": 2,
+     "gain_sc": 0.6,
+     "p_sc": 0.7,
+     "w_time": 0.001,
+     "lam_prior": 0.02,
+     "use_sc_prob": true,
+     "sc_alert_gain": 0.3,
+     "use_hazard": true,
+     "p1_box": 0.25,
+     "p3_box": 0.5,
+     "p3_prep": 0.2,
+     "p1_prep": 0.05,
+     "prep_near": null,
+     "use_stop_dist": true,
+     "q1_box": 0.2,
+     "q2_prep": 0.12,
+     "q1_prep": 0.1,
+     "hold": 0.7,
+     "use_wet_engine": true,
+     "tol_keep": 0.05,
+     "box_ttl": 2,
+     "box_cool": 3,
+     "box_q": 0.15,
+     "comp_tol": 0.1,
+     "comp_ttl": 5,
+     "sane_places": 6.0,
+     "sc_event": true,
+     "sc_window": 8,
+     "sc_tol": 0.5,
+     "sc_p8": 0.5,
+     "sw_min": 2,
+     "sw_share": 0.1,
+     "sw_delta_s": 1.0
+    },
+    "sim.PARAMS": {
+     "level_sd": 0.1,
+     "noise_sd": 0.2,
+     "deg_sd": 0.2,
+     "cliff_mult": 1.7,
+     "cliff_sd": 0.18,
+     "cliff_slope": 0.25,
+     "cliff_cap": 6.0,
+     "retire_rate": 0.0003,
+     "sc_pull": 0.85,
+     "vsc_pull": 0.45,
+     "sc_pull_window": 20,
+     "stop_extra_s": 3.0,
+     "stop_extra_neutral_s": 0.0,
+     "air_scale": 0.5,
+     "restart_gap": 2,
+     "stint_scale": 1.12,
+     "hold_gain": 1.0,
+     "stop_cdf": false,
+     "cdf_tail_scale": 1.0,
+     "common_pace_sd": 0.0,
+     "common_deg_sd": 0.0,
+     "slow_stops": false,
+     "stack_s": 0.0
+    }
+   },
+   "training_cutoff": "expanding window: each 2026 race scored by models trained on races that ended before it (min 10 earlier races); strategy tasks: models bundle trained before the first 2026 race",
+   "git": {
+    "commit": "521b399954",
+    "dirty": true,
+    "dirty_files": [
+     "itsense/README.md"
+    ]
+   },
+   "run_utc": "2026-10-21T05:22:12Z"
+  }
+ },
+ "headlines": [
+  {
+   "label": "Car pits next lap",
+   "task": "pit_within_1",
+   "model": "gbm_hazard",
+   "score": {
+    "log_loss": 0.1263,
+    "auc": 0.7907
+   },
+   "baseline": {
+    "model": "base_rate",
+    "log_loss": 0.1454
+   },
+   "n": 17218,
+   "provenance": {
+    "data": {
+     "feature_version": "v0.1",
+     "races": 40,
+     "races_by_year": {
+      "2025": 24,
+      "2026": 16
+     },
+     "manifest_sha256": "ef5f71a5323d",
+     "history_sha256": "461f507944ff"
+    },
+    "config": {
+     "hash": "efdd6e6d50e4",
+     "SETTINGS": {
+      "rival_cover": false,
+      "S": 288,
+      "S1": 96,
+      "S_B": 160,
+      "keep": 14,
+      "tol_box": 0.3,
+      "tol_prep": 0.5,
+      "prep_laps": 2,
+      "gain_sc": 0.6,
+      "p_sc": 0.7,
+      "w_time": 0.001,
+      "lam_prior": 0.02,
+      "use_sc_prob": true,
+      "sc_alert_gain": 0.3,
+      "use_hazard": true,
+      "p1_box": 0.25,
+      "p3_box": 0.5,
+      "p3_prep": 0.2,
+      "p1_prep": 0.05,
+      "prep_near": null,
+      "use_stop_dist": true,
+      "q1_box": 0.2,
+      "q2_prep": 0.12,
+      "q1_prep": 0.1,
+      "hold": 0.7,
+      "use_wet_engine": true,
+      "tol_keep": 0.05,
+      "box_ttl": 2,
+      "box_cool": 3,
+      "box_q": 0.15,
+      "comp_tol": 0.1,
+      "comp_ttl": 5,
+      "sane_places": 6.0,
+      "sc_event": true,
+      "sc_window": 8,
+      "sc_tol": 0.5,
+      "sc_p8": 0.5,
+      "sw_min": 2,
+      "sw_share": 0.1,
+      "sw_delta_s": 1.0
+     },
+     "sim.PARAMS": {
+      "level_sd": 0.1,
+      "noise_sd": 0.2,
+      "deg_sd": 0.2,
+      "cliff_mult": 1.7,
+      "cliff_sd": 0.18,
+      "cliff_slope": 0.25,
+      "cliff_cap": 6.0,
+      "retire_rate": 0.0003,
+      "sc_pull": 0.85,
+      "vsc_pull": 0.45,
+      "sc_pull_window": 20,
+      "stop_extra_s": 3.0,
+      "stop_extra_neutral_s": 0.0,
+      "air_scale": 0.5,
+      "restart_gap": 2,
+      "stint_scale": 1.12,
+      "hold_gain": 1.0,
+      "stop_cdf": false,
+      "cdf_tail_scale": 1.0,
+      "common_pace_sd": 0.0,
+      "common_deg_sd": 0.0,
+      "slow_stops": false,
+      "stack_s": 0.0
+     }
+    },
+    "training_cutoff": "expanding window: each 2026 race scored by models trained on races that ended before it (min 10 earlier races); strategy tasks: models bundle trained before the first 2026 race",
+    "git": {
+     "commit": "521b399954",
+     "dirty": true,
+     "dirty_files": [
+      "itsense/README.md"
+     ]
+    },
+    "run_utc": "2026-10-21T05:22:12Z"
+   }
+  },
+  {
+   "label": "Car pits within 3 laps",
+   "task": "pit_within_3",
+   "model": "gbm_hazard",
+   "score": {
+    "log_loss": 0.2833,
+    "auc": 0.7601
+   },
+   "baseline": {
+    "model": "base_rate",
+    "log_loss": 0.3246
+   },
+   "n": 17218,
+   "provenance": {
+    "data": {
+     "feature_version": "v0.1",
+     "races": 40,
+     "races_by_year": {
+      "2025": 24,
+      "2026": 16
+     },
+     "manifest_sha256": "ef5f71a5323d",
+     "history_sha256": "461f507944ff"
+    },
+    "config": {
+     "hash": "efdd6e6d50e4",
+     "SETTINGS": {
+      "rival_cover": false,
+      "S": 288,
+      "S1": 96,
+      "S_B": 160,
+      "keep": 14,
+      "tol_box": 0.3,
+      "tol_prep": 0.5,
+      "prep_laps": 2,
+      "gain_sc": 0.6,
+      "p_sc": 0.7,
+      "w_time": 0.001,
+      "lam_prior": 0.02,
+      "use_sc_prob": true,
+      "sc_alert_gain": 0.3,
+      "use_hazard": true,
+      "p1_box": 0.25,
+      "p3_box": 0.5,
+      "p3_prep": 0.2,
+      "p1_prep": 0.05,
+      "prep_near": null,
+      "use_stop_dist": true,
+      "q1_box": 0.2,
+      "q2_prep": 0.12,
+      "q1_prep": 0.1,
+      "hold": 0.7,
+      "use_wet_engine": true,
+      "tol_keep": 0.05,
+      "box_ttl": 2,
+      "box_cool": 3,
+      "box_q": 0.15,
+      "comp_tol": 0.1,
+      "comp_ttl": 5,
+      "sane_places": 6.0,
+      "sc_event": true,
+      "sc_window": 8,
+      "sc_tol": 0.5,
+      "sc_p8": 0.5,
+      "sw_min": 2,
+      "sw_share": 0.1,
+      "sw_delta_s": 1.0
+     },
+     "sim.PARAMS": {
+      "level_sd": 0.1,
+      "noise_sd": 0.2,
+      "deg_sd": 0.2,
+      "cliff_mult": 1.7,
+      "cliff_sd": 0.18,
+      "cliff_slope": 0.25,
+      "cliff_cap": 6.0,
+      "retire_rate": 0.0003,
+      "sc_pull": 0.85,
+      "vsc_pull": 0.45,
+      "sc_pull_window": 20,
+      "stop_extra_s": 3.0,
+      "stop_extra_neutral_s": 0.0,
+      "air_scale": 0.5,
+      "restart_gap": 2,
+      "stint_scale": 1.12,
+      "hold_gain": 1.0,
+      "stop_cdf": false,
+      "cdf_tail_scale": 1.0,
+      "common_pace_sd": 0.0,
+      "common_deg_sd": 0.0,
+      "slow_stops": false,
+      "stack_s": 0.0
+     }
+    },
+    "training_cutoff": "expanding window: each 2026 race scored by models trained on races that ended before it (min 10 earlier races); strategy tasks: models bundle trained before the first 2026 race",
+    "git": {
+     "commit": "521b399954",
+     "dirty": true,
+     "dirty_files": [
+      "itsense/README.md"
+     ]
+    },
+    "run_utc": "2026-10-21T05:22:12Z"
+   }
+  },
+  {
+   "label": "Rejoin position after a stop",
+   "task": "position_after_stop",
+   "model": "pitstop_rule",
+   "score": {
+    "exact": 0.6188,
+    "within_1": 0.8977
+   },
+   "baseline": {
+    "model": "no_change",
+    "exact": 0.3251,
+    "within_1": 0.5215
+   },
+   "n": 606,
+   "provenance": {
+    "data": {
+     "feature_version": "v0.1",
+     "races": 40,
+     "races_by_year": {
+      "2025": 24,
+      "2026": 16
+     },
+     "manifest_sha256": "ef5f71a5323d",
+     "history_sha256": "461f507944ff"
+    },
+    "config": {
+     "hash": "efdd6e6d50e4",
+     "SETTINGS": {
+      "rival_cover": false,
+      "S": 288,
+      "S1": 96,
+      "S_B": 160,
+      "keep": 14,
+      "tol_box": 0.3,
+      "tol_prep": 0.5,
+      "prep_laps": 2,
+      "gain_sc": 0.6,
+      "p_sc": 0.7,
+      "w_time": 0.001,
+      "lam_prior": 0.02,
+      "use_sc_prob": true,
+      "sc_alert_gain": 0.3,
+      "use_hazard": true,
+      "p1_box": 0.25,
+      "p3_box": 0.5,
+      "p3_prep": 0.2,
+      "p1_prep": 0.05,
+      "prep_near": null,
+      "use_stop_dist": true,
+      "q1_box": 0.2,
+      "q2_prep": 0.12,
+      "q1_prep": 0.1,
+      "hold": 0.7,
+      "use_wet_engine": true,
+      "tol_keep": 0.05,
+      "box_ttl": 2,
+      "box_cool": 3,
+      "box_q": 0.15,
+      "comp_tol": 0.1,
+      "comp_ttl": 5,
+      "sane_places": 6.0,
+      "sc_event": true,
+      "sc_window": 8,
+      "sc_tol": 0.5,
+      "sc_p8": 0.5,
+      "sw_min": 2,
+      "sw_share": 0.1,
+      "sw_delta_s": 1.0
+     },
+     "sim.PARAMS": {
+      "level_sd": 0.1,
+      "noise_sd": 0.2,
+      "deg_sd": 0.2,
+      "cliff_mult": 1.7,
+      "cliff_sd": 0.18,
+      "cliff_slope": 0.25,
+      "cliff_cap": 6.0,
+      "retire_rate": 0.0003,
+      "sc_pull": 0.85,
+      "vsc_pull": 0.45,
+      "sc_pull_window": 20,
+      "stop_extra_s": 3.0,
+      "stop_extra_neutral_s": 0.0,
+      "air_scale": 0.5,
+      "restart_gap": 2,
+      "stint_scale": 1.12,
+      "hold_gain": 1.0,
+      "stop_cdf": false,
+      "cdf_tail_scale": 1.0,
+      "common_pace_sd": 0.0,
+      "common_deg_sd": 0.0,
+      "slow_stops": false,
+      "stack_s": 0.0
+     }
+    },
+    "training_cutoff": "expanding window: each 2026 race scored by models trained on races that ended before it (min 10 earlier races); strategy tasks: models bundle trained before the first 2026 race",
+    "git": {
+     "commit": "521b399954",
+     "dirty": true,
+     "dirty_files": [
+      "itsense/README.md"
+     ]
+    },
+    "run_utc": "2026-10-21T05:22:12Z"
+   }
+  },
+  {
+   "label": "Time a stop costs, s",
+   "task": "pit_loss",
+   "model": "v01_prior_shrink",
+   "score": {
+    "mae": 4.0255
+   },
+   "baseline": {
+    "model": "pitstop_loss_gbm",
+    "mae": 4.3289
+   },
+   "n": 467,
+   "provenance": {
+    "data": {
+     "feature_version": "v0.1",
+     "races": 40,
+     "races_by_year": {
+      "2025": 24,
+      "2026": 16
+     },
+     "manifest_sha256": "ef5f71a5323d",
+     "history_sha256": "461f507944ff"
+    },
+    "config": {
+     "hash": "efdd6e6d50e4",
+     "SETTINGS": {
+      "rival_cover": false,
+      "S": 288,
+      "S1": 96,
+      "S_B": 160,
+      "keep": 14,
+      "tol_box": 0.3,
+      "tol_prep": 0.5,
+      "prep_laps": 2,
+      "gain_sc": 0.6,
+      "p_sc": 0.7,
+      "w_time": 0.001,
+      "lam_prior": 0.02,
+      "use_sc_prob": true,
+      "sc_alert_gain": 0.3,
+      "use_hazard": true,
+      "p1_box": 0.25,
+      "p3_box": 0.5,
+      "p3_prep": 0.2,
+      "p1_prep": 0.05,
+      "prep_near": null,
+      "use_stop_dist": true,
+      "q1_box": 0.2,
+      "q2_prep": 0.12,
+      "q1_prep": 0.1,
+      "hold": 0.7,
+      "use_wet_engine": true,
+      "tol_keep": 0.05,
+      "box_ttl": 2,
+      "box_cool": 3,
+      "box_q": 0.15,
+      "comp_tol": 0.1,
+      "comp_ttl": 5,
+      "sane_places": 6.0,
+      "sc_event": true,
+      "sc_window": 8,
+      "sc_tol": 0.5,
+      "sc_p8": 0.5,
+      "sw_min": 2,
+      "sw_share": 0.1,
+      "sw_delta_s": 1.0
+     },
+     "sim.PARAMS": {
+      "level_sd": 0.1,
+      "noise_sd": 0.2,
+      "deg_sd": 0.2,
+      "cliff_mult": 1.7,
+      "cliff_sd": 0.18,
+      "cliff_slope": 0.25,
+      "cliff_cap": 6.0,
+      "retire_rate": 0.0003,
+      "sc_pull": 0.85,
+      "vsc_pull": 0.45,
+      "sc_pull_window": 20,
+      "stop_extra_s": 3.0,
+      "stop_extra_neutral_s": 0.0,
+      "air_scale": 0.5,
+      "restart_gap": 2,
+      "stint_scale": 1.12,
+      "hold_gain": 1.0,
+      "stop_cdf": false,
+      "cdf_tail_scale": 1.0,
+      "common_pace_sd": 0.0,
+      "common_deg_sd": 0.0,
+      "slow_stops": false,
+      "stack_s": 0.0
+     }
+    },
+    "training_cutoff": "expanding window: each 2026 race scored by models trained on races that ended before it (min 10 earlier races); strategy tasks: models bundle trained before the first 2026 race",
+    "git": {
+     "commit": "521b399954",
+     "dirty": true,
+     "dirty_files": [
+      "itsense/README.md"
+     ]
+    },
+    "run_utc": "2026-10-21T05:22:12Z"
+   }
+  },
+  {
+   "label": "Next lap time, s",
+   "task": "next_lap_time",
+   "model": "next_lap_gbm",
+   "score": {
+    "mae": 0.6883
+   },
+   "baseline": {
+    "model": "stint_median",
+    "mae": 1.7845
+   },
+   "n": 14263,
+   "provenance": {
+    "data": {
+     "feature_version": "v0.1",
+     "races": 40,
+     "races_by_year": {
+      "2025": 24,
+      "2026": 16
+     },
+     "manifest_sha256": "ef5f71a5323d",
+     "history_sha256": "461f507944ff"
+    },
+    "config": {
+     "hash": "efdd6e6d50e4",
+     "SETTINGS": {
+      "rival_cover": false,
+      "S": 288,
+      "S1": 96,
+      "S_B": 160,
+      "keep": 14,
+      "tol_box": 0.3,
+      "tol_prep": 0.5,
+      "prep_laps": 2,
+      "gain_sc": 0.6,
+      "p_sc": 0.7,
+      "w_time": 0.001,
+      "lam_prior": 0.02,
+      "use_sc_prob": true,
+      "sc_alert_gain": 0.3,
+      "use_hazard": true,
+      "p1_box": 0.25,
+      "p3_box": 0.5,
+      "p3_prep": 0.2,
+      "p1_prep": 0.05,
+      "prep_near": null,
+      "use_stop_dist": true,
+      "q1_box": 0.2,
+      "q2_prep": 0.12,
+      "q1_prep": 0.1,
+      "hold": 0.7,
+      "use_wet_engine": true,
+      "tol_keep": 0.05,
+      "box_ttl": 2,
+      "box_cool": 3,
+      "box_q": 0.15,
+      "comp_tol": 0.1,
+      "comp_ttl": 5,
+      "sane_places": 6.0,
+      "sc_event": true,
+      "sc_window": 8,
+      "sc_tol": 0.5,
+      "sc_p8": 0.5,
+      "sw_min": 2,
+      "sw_share": 0.1,
+      "sw_delta_s": 1.0
+     },
+     "sim.PARAMS": {
+      "level_sd": 0.1,
+      "noise_sd": 0.2,
+      "deg_sd": 0.2,
+      "cliff_mult": 1.7,
+      "cliff_sd": 0.18,
+      "cliff_slope": 0.25,
+      "cliff_cap": 6.0,
+      "retire_rate": 0.0003,
+      "sc_pull": 0.85,
+      "vsc_pull": 0.45,
+      "sc_pull_window": 20,
+      "stop_extra_s": 3.0,
+      "stop_extra_neutral_s": 0.0,
+      "air_scale": 0.5,
+      "restart_gap": 2,
+      "stint_scale": 1.12,
+      "hold_gain": 1.0,
+      "stop_cdf": false,
+      "cdf_tail_scale": 1.0,
+      "common_pace_sd": 0.0,
+      "common_deg_sd": 0.0,
+      "slow_stops": false,
+      "stack_s": 0.0
+     }
+    },
+    "training_cutoff": "expanding window: each 2026 race scored by models trained on races that ended before it (min 10 earlier races); strategy tasks: models bundle trained before the first 2026 race",
+    "git": {
+     "commit": "521b399954",
+     "dirty": true,
+     "dirty_files": [
+      "itsense/README.md"
+     ]
+    },
+    "run_utc": "2026-10-21T05:22:12Z"
+   }
+  },
+  {
+   "label": "Lap time 5 laps ahead, s",
+   "task": "lap_time_5",
+   "model": "lap5_gbm",
+   "score": {
+    "mae": 0.8718
+   },
+   "baseline": {
+    "model": "stint_median",
+    "mae": 2.0439
+   },
+   "n": 9438,
+   "provenance": {
+    "data": {
+     "feature_version": "v0.1",
+     "races": 40,
+     "races_by_year": {
+      "2025": 24,
+      "2026": 16
+     },
+     "manifest_sha256": "ef5f71a5323d",
+     "history_sha256": "461f507944ff"
+    },
+    "config": {
+     "hash": "efdd6e6d50e4",
+     "SETTINGS": {
+      "rival_cover": false,
+      "S": 288,
+      "S1": 96,
+      "S_B": 160,
+      "keep": 14,
+      "tol_box": 0.3,
+      "tol_prep": 0.5,
+      "prep_laps": 2,
+      "gain_sc": 0.6,
+      "p_sc": 0.7,
+      "w_time": 0.001,
+      "lam_prior": 0.02,
+      "use_sc_prob": true,
+      "sc_alert_gain": 0.3,
+      "use_hazard": true,
+      "p1_box": 0.25,
+      "p3_box": 0.5,
+      "p3_prep": 0.2,
+      "p1_prep": 0.05,
+      "prep_near": null,
+      "use_stop_dist": true,
+      "q1_box": 0.2,
+      "q2_prep": 0.12,
+      "q1_prep": 0.1,
+      "hold": 0.7,
+      "use_wet_engine": true,
+      "tol_keep": 0.05,
+      "box_ttl": 2,
+      "box_cool": 3,
+      "box_q": 0.15,
+      "comp_tol": 0.1,
+      "comp_ttl": 5,
+      "sane_places": 6.0,
+      "sc_event": true,
+      "sc_window": 8,
+      "sc_tol": 0.5,
+      "sc_p8": 0.5,
+      "sw_min": 2,
+      "sw_share": 0.1,
+      "sw_delta_s": 1.0
+     },
+     "sim.PARAMS": {
+      "level_sd": 0.1,
+      "noise_sd": 0.2,
+      "deg_sd": 0.2,
+      "cliff_mult": 1.7,
+      "cliff_sd": 0.18,
+      "cliff_slope": 0.25,
+      "cliff_cap": 6.0,
+      "retire_rate": 0.0003,
+      "sc_pull": 0.85,
+      "vsc_pull": 0.45,
+      "sc_pull_window": 20,
+      "stop_extra_s": 3.0,
+      "stop_extra_neutral_s": 0.0,
+      "air_scale": 0.5,
+      "restart_gap": 2,
+      "stint_scale": 1.12,
+      "hold_gain": 1.0,
+      "stop_cdf": false,
+      "cdf_tail_scale": 1.0,
+      "common_pace_sd": 0.0,
+      "common_deg_sd": 0.0,
+      "slow_stops": false,
+      "stack_s": 0.0
+     }
+    },
+    "training_cutoff": "expanding window: each 2026 race scored by models trained on races that ended before it (min 10 earlier races); strategy tasks: models bundle trained before the first 2026 race",
+    "git": {
+     "commit": "521b399954",
+     "dirty": true,
+     "dirty_files": [
+      "itsense/README.md"
+     ]
+    },
+    "run_utc": "2026-10-21T05:22:12Z"
+   }
+  },
+  {
+   "label": "Tyre cliff within 3 laps",
+   "task": "tyre_cliff_3",
+   "model": "cliff_gbm",
+   "score": {
+    "auc": 0.8058,
+    "log_loss": 0.1255
+   },
+   "baseline": {
+    "model": "base_rate",
+    "auc": 0.4097
+   },
+   "n": 9195,
+   "provenance": {
+    "data": {
+     "feature_version": "v0.1",
+     "races": 40,
+     "races_by_year": {
+      "2025": 24,
+      "2026": 16
+     },
+     "manifest_sha256": "ef5f71a5323d",
+     "history_sha256": "461f507944ff"
+    },
+    "config": {
+     "hash": "efdd6e6d50e4",
+     "SETTINGS": {
+      "rival_cover": false,
+      "S": 288,
+      "S1": 96,
+      "S_B": 160,
+      "keep": 14,
+      "tol_box": 0.3,
+      "tol_prep": 0.5,
+      "prep_laps": 2,
+      "gain_sc": 0.6,
+      "p_sc": 0.7,
+      "w_time": 0.001,
+      "lam_prior": 0.02,
+      "use_sc_prob": true,
+      "sc_alert_gain": 0.3,
+      "use_hazard": true,
+      "p1_box": 0.25,
+      "p3_box": 0.5,
+      "p3_prep": 0.2,
+      "p1_prep": 0.05,
+      "prep_near": null,
+      "use_stop_dist": true,
+      "q1_box": 0.2,
+      "q2_prep": 0.12,
+      "q1_prep": 0.1,
+      "hold": 0.7,
+      "use_wet_engine": true,
+      "tol_keep": 0.05,
+      "box_ttl": 2,
+      "box_cool": 3,
+      "box_q": 0.15,
+      "comp_tol": 0.1,
+      "comp_ttl": 5,
+      "sane_places": 6.0,
+      "sc_event": true,
+      "sc_window": 8,
+      "sc_tol": 0.5,
+      "sc_p8": 0.5,
+      "sw_min": 2,
+      "sw_share": 0.1,
+      "sw_delta_s": 1.0
+     },
+     "sim.PARAMS": {
+      "level_sd": 0.1,
+      "noise_sd": 0.2,
+      "deg_sd": 0.2,
+      "cliff_mult": 1.7,
+      "cliff_sd": 0.18,
+      "cliff_slope": 0.25,
+      "cliff_cap": 6.0,
+      "retire_rate": 0.0003,
+      "sc_pull": 0.85,
+      "vsc_pull": 0.45,
+      "sc_pull_window": 20,
+      "stop_extra_s": 3.0,
+      "stop_extra_neutral_s": 0.0,
+      "air_scale": 0.5,
+      "restart_gap": 2,
+      "stint_scale": 1.12,
+      "hold_gain": 1.0,
+      "stop_cdf": false,
+      "cdf_tail_scale": 1.0,
+      "common_pace_sd": 0.0,
+      "common_deg_sd": 0.0,
+      "slow_stops": false,
+      "stack_s": 0.0
+     }
+    },
+    "training_cutoff": "expanding window: each 2026 race scored by models trained on races that ended before it (min 10 earlier races); strategy tasks: models bundle trained before the first 2026 race",
+    "git": {
+     "commit": "521b399954",
+     "dirty": true,
+     "dirty_files": [
+      "itsense/README.md"
+     ]
+    },
+    "run_utc": "2026-10-21T05:22:12Z"
+   }
+  },
+  {
+   "label": "Pace on fresh tyres, s",
+   "task": "fresh_tyre_pace",
+   "model": "fresh_gbm",
+   "score": {
+    "mae": 0.8568
+   },
+   "baseline": {
+    "model": "stint_best",
+    "mae": 1.044
+   },
+   "n": 303,
+   "provenance": {
+    "data": {
+     "feature_version": "v0.1",
+     "races": 40,
+     "races_by_year": {
+      "2025": 24,
+      "2026": 16
+     },
+     "manifest_sha256": "ef5f71a5323d",
+     "history_sha256": "461f507944ff"
+    },
+    "config": {
+     "hash": "efdd6e6d50e4",
+     "SETTINGS": {
+      "rival_cover": false,
+      "S": 288,
+      "S1": 96,
+      "S_B": 160,
+      "keep": 14,
+      "tol_box": 0.3,
+      "tol_prep": 0.5,
+      "prep_laps": 2,
+      "gain_sc": 0.6,
+      "p_sc": 0.7,
+      "w_time": 0.001,
+      "lam_prior": 0.02,
+      "use_sc_prob": true,
+      "sc_alert_gain": 0.3,
+      "use_hazard": true,
+      "p1_box": 0.25,
+      "p3_box": 0.5,
+      "p3_prep": 0.2,
+      "p1_prep": 0.05,
+      "prep_near": null,
+      "use_stop_dist": true,
+      "q1_box": 0.2,
+      "q2_prep": 0.12,
+      "q1_prep": 0.1,
+      "hold": 0.7,
+      "use_wet_engine": true,
+      "tol_keep": 0.05,
+      "box_ttl": 2,
+      "box_cool": 3,
+      "box_q": 0.15,
+      "comp_tol": 0.1,
+      "comp_ttl": 5,
+      "sane_places": 6.0,
+      "sc_event": true,
+      "sc_window": 8,
+      "sc_tol": 0.5,
+      "sc_p8": 0.5,
+      "sw_min": 2,
+      "sw_share": 0.1,
+      "sw_delta_s": 1.0
+     },
+     "sim.PARAMS": {
+      "level_sd": 0.1,
+      "noise_sd": 0.2,
+      "deg_sd": 0.2,
+      "cliff_mult": 1.7,
+      "cliff_sd": 0.18,
+      "cliff_slope": 0.25,
+      "cliff_cap": 6.0,
+      "retire_rate": 0.0003,
+      "sc_pull": 0.85,
+      "vsc_pull": 0.45,
+      "sc_pull_window": 20,
+      "stop_extra_s": 3.0,
+      "stop_extra_neutral_s": 0.0,
+      "air_scale": 0.5,
+      "restart_gap": 2,
+      "stint_scale": 1.12,
+      "hold_gain": 1.0,
+      "stop_cdf": false,
+      "cdf_tail_scale": 1.0,
+      "common_pace_sd": 0.0,
+      "common_deg_sd": 0.0,
+      "slow_stops": false,
+      "stack_s": 0.0
+     }
+    },
+    "training_cutoff": "expanding window: each 2026 race scored by models trained on races that ended before it (min 10 earlier races); strategy tasks: models bundle trained before the first 2026 race",
+    "git": {
+     "commit": "521b399954",
+     "dirty": true,
+     "dirty_files": [
+      "itsense/README.md"
+     ]
+    },
+    "run_utc": "2026-10-21T05:22:12Z"
+   }
+  },
+  {
+   "label": "Undercut by the car behind within 5 laps",
+   "task": "undercut_5",
+   "model": "rivals_threat",
+   "score": {
+    "auc": 0.8074
+   },
+   "baseline": {
+    "model": "base_rate",
+    "auc": 0.4909
+   },
+   "n": 14678,
+   "provenance": {
+    "data": {
+     "feature_version": "v0.1",
+     "races": 40,
+     "races_by_year": {
+      "2025": 24,
+      "2026": 16
+     },
+     "manifest_sha256": "ef5f71a5323d",
+     "history_sha256": "461f507944ff"
+    },
+    "config": {
+     "hash": "efdd6e6d50e4",
+     "SETTINGS": {
+      "rival_cover": false,
+      "S": 288,
+      "S1": 96,
+      "S_B": 160,
+      "keep": 14,
+      "tol_box": 0.3,
+      "tol_prep": 0.5,
+      "prep_laps": 2,
+      "gain_sc": 0.6,
+      "p_sc": 0.7,
+      "w_time": 0.001,
+      "lam_prior": 0.02,
+      "use_sc_prob": true,
+      "sc_alert_gain": 0.3,
+      "use_hazard": true,
+      "p1_box": 0.25,
+      "p3_box": 0.5,
+      "p3_prep": 0.2,
+      "p1_prep": 0.05,
+      "prep_near": null,
+      "use_stop_dist": true,
+      "q1_box": 0.2,
+      "q2_prep": 0.12,
+      "q1_prep": 0.1,
+      "hold": 0.7,
+      "use_wet_engine": true,
+      "tol_keep": 0.05,
+      "box_ttl": 2,
+      "box_cool": 3,
+      "box_q": 0.15,
+      "comp_tol": 0.1,
+      "comp_ttl": 5,
+      "sane_places": 6.0,
+      "sc_event": true,
+      "sc_window": 8,
+      "sc_tol": 0.5,
+      "sc_p8": 0.5,
+      "sw_min": 2,
+      "sw_share": 0.1,
+      "sw_delta_s": 1.0
+     },
+     "sim.PARAMS": {
+      "level_sd": 0.1,
+      "noise_sd": 0.2,
+      "deg_sd": 0.2,
+      "cliff_mult": 1.7,
+      "cliff_sd": 0.18,
+      "cliff_slope": 0.25,
+      "cliff_cap": 6.0,
+      "retire_rate": 0.0003,
+      "sc_pull": 0.85,
+      "vsc_pull": 0.45,
+      "sc_pull_window": 20,
+      "stop_extra_s": 3.0,
+      "stop_extra_neutral_s": 0.0,
+      "air_scale": 0.5,
+      "restart_gap": 2,
+      "stint_scale": 1.12,
+      "hold_gain": 1.0,
+      "stop_cdf": false,
+      "cdf_tail_scale": 1.0,
+      "common_pace_sd": 0.0,
+      "common_deg_sd": 0.0,
+      "slow_stops": false,
+      "stack_s": 0.0
+     }
+    },
+    "training_cutoff": "expanding window: each 2026 race scored by models trained on races that ended before it (min 10 earlier races); strategy tasks: models bundle trained before the first 2026 race",
+    "git": {
+     "commit": "521b399954",
+     "dirty": true,
+     "dirty_files": [
+      "itsense/README.md"
+     ]
+    },
+    "run_utc": "2026-10-21T05:22:12Z"
+   }
+  },
+  {
+   "label": "Rain within 10 minutes",
+   "task": "rain_10min",
+   "model": "gbm_weather [all]",
+   "score": {
+    "log_loss": 0.0717
+   },
+   "baseline": {
+    "model": "rc_risk_raw [wet_races]",
+    "log_loss": 0.955
+   },
+   "n": 17373,
+   "provenance": {
+    "data": {
+     "feature_version": "v0.1",
+     "races": 40,
+     "races_by_year": {
+      "2025": 24,
+      "2026": 16
+     },
+     "manifest_sha256": "ef5f71a5323d",
+     "history_sha256": "461f507944ff"
+    },
+    "config": {
+     "hash": "efdd6e6d50e4",
+     "SETTINGS": {
+      "rival_cover": false,
+      "S": 288,
+      "S1": 96,
+      "S_B": 160,
+      "keep": 14,
+      "tol_box": 0.3,
+      "tol_prep": 0.5,
+      "prep_laps": 2,
+      "gain_sc": 0.6,
+      "p_sc": 0.7,
+      "w_time": 0.001,
+      "lam_prior": 0.02,
+      "use_sc_prob": true,
+      "sc_alert_gain": 0.3,
+      "use_hazard": true,
+      "p1_box": 0.25,
+      "p3_box": 0.5,
+      "p3_prep": 0.2,
+      "p1_prep": 0.05,
+      "prep_near": null,
+      "use_stop_dist": true,
+      "q1_box": 0.2,
+      "q2_prep": 0.12,
+      "q1_prep": 0.1,
+      "hold": 0.7,
+      "use_wet_engine": true,
+      "tol_keep": 0.05,
+      "box_ttl": 2,
+      "box_cool": 3,
+      "box_q": 0.15,
+      "comp_tol": 0.1,
+      "comp_ttl": 5,
+      "sane_places": 6.0,
+      "sc_event": true,
+      "sc_window": 8,
+      "sc_tol": 0.5,
+      "sc_p8": 0.5,
+      "sw_min": 2,
+      "sw_share": 0.1,
+      "sw_delta_s": 1.0
+     },
+     "sim.PARAMS": {
+      "level_sd": 0.1,
+      "noise_sd": 0.2,
+      "deg_sd": 0.2,
+      "cliff_mult": 1.7,
+      "cliff_sd": 0.18,
+      "cliff_slope": 0.25,
+      "cliff_cap": 6.0,
+      "retire_rate": 0.0003,
+      "sc_pull": 0.85,
+      "vsc_pull": 0.45,
+      "sc_pull_window": 20,
+      "stop_extra_s": 3.0,
+      "stop_extra_neutral_s": 0.0,
+      "air_scale": 0.5,
+      "restart_gap": 2,
+      "stint_scale": 1.12,
+      "hold_gain": 1.0,
+      "stop_cdf": false,
+      "cdf_tail_scale": 1.0,
+      "common_pace_sd": 0.0,
+      "common_deg_sd": 0.0,
+      "slow_stops": false,
+      "stack_s": 0.0
+     }
+    },
+    "training_cutoff": "expanding window: each 2026 race scored by models trained on races that ended before it (min 10 earlier races); strategy tasks: models bundle trained before the first 2026 race",
+    "git": {
+     "commit": "521b399954",
+     "dirty": true,
+     "dirty_files": [
+      "itsense/README.md"
+     ]
+    },
+    "run_utc": "2026-10-21T05:22:12Z"
+   }
+  },
+  {
+   "label": "Safety car within 2 laps",
+   "task": "sc_within_2",
+   "model": "engineer",
+   "score": {
+    "log_loss": 0.2445
+   },
+   "baseline": {
+    "model": "gbm_signals",
+    "log_loss": 0.2811
+   },
+   "n": 896,
+   "provenance": {
+    "data": {
+     "feature_version": "v0.1",
+     "races": 40,
+     "races_by_year": {
+      "2025": 24,
+      "2026": 16
+     },
+     "manifest_sha256": "ef5f71a5323d",
+     "history_sha256": "461f507944ff"
+    },
+    "config": {
+     "hash": "efdd6e6d50e4",
+     "SETTINGS": {
+      "rival_cover": false,
+      "S": 288,
+      "S1": 96,
+      "S_B": 160,
+      "keep": 14,
+      "tol_box": 0.3,
+      "tol_prep": 0.5,
+      "prep_laps": 2,
+      "gain_sc": 0.6,
+      "p_sc": 0.7,
+      "w_time": 0.001,
+      "lam_prior": 0.02,
+      "use_sc_prob": true,
+      "sc_alert_gain": 0.3,
+      "use_hazard": true,
+      "p1_box": 0.25,
+      "p3_box": 0.5,
+      "p3_prep": 0.2,
+      "p1_prep": 0.05,
+      "prep_near": null,
+      "use_stop_dist": true,
+      "q1_box": 0.2,
+      "q2_prep": 0.12,
+      "q1_prep": 0.1,
+      "hold": 0.7,
+      "use_wet_engine": true,
+      "tol_keep": 0.05,
+      "box_ttl": 2,
+      "box_cool": 3,
+      "box_q": 0.15,
+      "comp_tol": 0.1,
+      "comp_ttl": 5,
+      "sane_places": 6.0,
+      "sc_event": true,
+      "sc_window": 8,
+      "sc_tol": 0.5,
+      "sc_p8": 0.5,
+      "sw_min": 2,
+      "sw_share": 0.1,
+      "sw_delta_s": 1.0
+     },
+     "sim.PARAMS": {
+      "level_sd": 0.1,
+      "noise_sd": 0.2,
+      "deg_sd": 0.2,
+      "cliff_mult": 1.7,
+      "cliff_sd": 0.18,
+      "cliff_slope": 0.25,
+      "cliff_cap": 6.0,
+      "retire_rate": 0.0003,
+      "sc_pull": 0.85,
+      "vsc_pull": 0.45,
+      "sc_pull_window": 20,
+      "stop_extra_s": 3.0,
+      "stop_extra_neutral_s": 0.0,
+      "air_scale": 0.5,
+      "restart_gap": 2,
+      "stint_scale": 1.12,
+      "hold_gain": 1.0,
+      "stop_cdf": false,
+      "cdf_tail_scale": 1.0,
+      "common_pace_sd": 0.0,
+      "common_deg_sd": 0.0,
+      "slow_stops": false,
+      "stack_s": 0.0
+     }
+    },
+    "training_cutoff": "expanding window: each 2026 race scored by models trained on races that ended before it (min 10 earlier races); strategy tasks: models bundle trained before the first 2026 race",
+    "git": {
+     "commit": "521b399954",
+     "dirty": true,
+     "dirty_files": [
+      "itsense/README.md"
+     ]
+    },
+    "run_utc": "2026-10-21T05:22:12Z"
+   }
+  },
+  {
+   "label": "Laps until next stop",
+   "task": "laps_to_stop",
+   "model": "survival_hz",
+   "score": {
+    "c_index": 0.739
+   },
+   "baseline": {
+    "model": "base_hazard",
+    "c_index": 0.6067
+   },
+   "n": 17218,
+   "provenance": {
+    "data": {
+     "feature_version": "v0.1",
+     "races": 40,
+     "races_by_year": {
+      "2025": 24,
+      "2026": 16
+     },
+     "manifest_sha256": "ef5f71a5323d",
+     "history_sha256": "461f507944ff"
+    },
+    "config": {
+     "hash": "efdd6e6d50e4",
+     "SETTINGS": {
+      "rival_cover": false,
+      "S": 288,
+      "S1": 96,
+      "S_B": 160,
+      "keep": 14,
+      "tol_box": 0.3,
+      "tol_prep": 0.5,
+      "prep_laps": 2,
+      "gain_sc": 0.6,
+      "p_sc": 0.7,
+      "w_time": 0.001,
+      "lam_prior": 0.02,
+      "use_sc_prob": true,
+      "sc_alert_gain": 0.3,
+      "use_hazard": true,
+      "p1_box": 0.25,
+      "p3_box": 0.5,
+      "p3_prep": 0.2,
+      "p1_prep": 0.05,
+      "prep_near": null,
+      "use_stop_dist": true,
+      "q1_box": 0.2,
+      "q2_prep": 0.12,
+      "q1_prep": 0.1,
+      "hold": 0.7,
+      "use_wet_engine": true,
+      "tol_keep": 0.05,
+      "box_ttl": 2,
+      "box_cool": 3,
+      "box_q": 0.15,
+      "comp_tol": 0.1,
+      "comp_ttl": 5,
+      "sane_places": 6.0,
+      "sc_event": true,
+      "sc_window": 8,
+      "sc_tol": 0.5,
+      "sc_p8": 0.5,
+      "sw_min": 2,
+      "sw_share": 0.1,
+      "sw_delta_s": 1.0
+     },
+     "sim.PARAMS": {
+      "level_sd": 0.1,
+      "noise_sd": 0.2,
+      "deg_sd": 0.2,
+      "cliff_mult": 1.7,
+      "cliff_sd": 0.18,
+      "cliff_slope": 0.25,
+      "cliff_cap": 6.0,
+      "retire_rate": 0.0003,
+      "sc_pull": 0.85,
+      "vsc_pull": 0.45,
+      "sc_pull_window": 20,
+      "stop_extra_s": 3.0,
+      "stop_extra_neutral_s": 0.0,
+      "air_scale": 0.5,
+      "restart_gap": 2,
+      "stint_scale": 1.12,
+      "hold_gain": 1.0,
+      "stop_cdf": false,
+      "cdf_tail_scale": 1.0,
+      "common_pace_sd": 0.0,
+      "common_deg_sd": 0.0,
+      "slow_stops": false,
+      "stack_s": 0.0
+     }
+    },
+    "training_cutoff": "expanding window: each 2026 race scored by models trained on races that ended before it (min 10 earlier races); strategy tasks: models bundle trained before the first 2026 race",
+    "git": {
+     "commit": "521b399954",
+     "dirty": true,
+     "dirty_files": [
+      "itsense/README.md"
+     ]
+    },
+    "run_utc": "2026-10-21T05:22:12Z"
+   }
+  }
+ ],
+ "decision": null,
+ "calls": null,
+ "decision_provenance": null,
+ "voice": null,
+ "holdout_audit": [
+  {
+   "component": "benchmark models (all tasks)",
+   "tuned_on": "races that ended before each test race",
+   "check": "automatic",
+   "passed": true,
+   "test_year_used_for_tuning": false,
+   "how": "evaluate._splits on a synthetic calendar; fit_predict asserts the cutoff on every fit"
+  },
+  {
+   "component": "models bundle for the pit wall replays",
+   "tuned_on": "races ended before 2025-12-07",
+   "check": "automatic",
+   "passed": true,
+   "test_year_used_for_tuning": false,
+   "how": "train_end_utc < first 2026 race start"
+  },
+  {
+   "component": "voice (scratch model, LoRA fine-tune)",
+   "tuned_on": "races before 2026",
+   "check": "automatic",
+   "passed": true,
+   "test_year_used_for_tuning": false,
+   "how": "voice.synth.split_races"
+  },
+  {
+   "component": "strategy simulator + head thresholds (SETTINGS, sim.PARAMS)",
+   "tuned_on": "2025",
+   "check": "declared",
+   "passed": true,
+   "test_year_used_for_tuning": false,
+   "how": "docs/engineers/strategy.md"
+  },
+  {
+   "component": "wet engine thresholds",
+   "tuned_on": "2018-2024 wet races",
+   "check": "declared",
+   "passed": true,
+   "test_year_used_for_tuning": false,
+   "how": "docs/engineers/strategy.md"
+  },
+  {
+   "component": "safety-car engineer",
+   "tuned_on": "2025 (--select-year)",
+   "check": "declared",
+   "passed": true,
+   "test_year_used_for_tuning": false,
+   "how": "docs/engineers/safetycar.md"
+  },
+  {
+   "component": "qualifying model",
+   "tuned_on": "2025 sessions",
+   "check": "declared",
+   "passed": true,
+   "test_year_used_for_tuning": false,
+   "how": "bench/quali.py"
+  },
+  {
+   "component": "benchmark model settings",
+   "tuned_on": "2025",
+   "check": "declared",
+   "passed": true,
+   "test_year_used_for_tuning": false,
+   "how": "README / docs/models.md"
+  },
+  {
+   "component": "decision value / fair call scoring",
+   "tuned_on": "nothing (windows and options fixed before scoring)",
+   "check": "declared",
+   "passed": true,
+   "test_year_used_for_tuning": false,
+   "how": "bench/decision.py, bench/callscore.py"
+  }
+ ]
+}
