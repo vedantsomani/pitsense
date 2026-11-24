@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="470" viewBox="0 0 560 470" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
+<rect width="560" height="470" rx="10" fill="#1a1a19"/>
+<text x="24.0" y="34.0" fill="#f0efec" font-size="18" font-weight="600" text-anchor="start">Pit-stop probabilities are calibrated</text>
+<text x="24.0" y="56.0" fill="#c3c2b7" font-size="13" font-weight="400" text-anchor="start">Predicted vs observed rate per bin, 2026 races (gbm_hazard)</text>
+<line x1="70" x2="530" y1="406.0" y2="406.0" stroke="#2c2c2a"/>
+<text x="60.0" y="410.0" fill="#898781" font-size="12" font-weight="400" text-anchor="end">0%</text>
+<text x="70.0" y="426.0" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">0%</text>
+<line x1="70" x2="530" y1="351.3" y2="351.3" stroke="#2c2c2a"/>
+<text x="60.0" y="355.3" fill="#898781" font-size="12" font-weight="400" text-anchor="end">10%</text>
+<text x="146.7" y="426.0" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">10%</text>
+<line x1="70" x2="530" y1="296.7" y2="296.7" stroke="#2c2c2a"/>
+<text x="60.0" y="300.7" fill="#898781" font-size="12" font-weight="400" text-anchor="end">20%</text>
+<text x="223.3" y="426.0" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">20%</text>
+<line x1="70" x2="530" y1="242.0" y2="242.0" stroke="#2c2c2a"/>
+<text x="60.0" y="246.0" fill="#898781" font-size="12" font-weight="400" text-anchor="end">30%</text>
+<text x="300.0" y="426.0" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">30%</text>
+<line x1="70" x2="530" y1="187.3" y2="187.3" stroke="#2c2c2a"/>
+<text x="60.0" y="191.3" fill="#898781" font-size="12" font-weight="400" text-anchor="end">40%</text>
+<text x="376.7" y="426.0" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">40%</text>
+<line x1="70" x2="530" y1="132.7" y2="132.7" stroke="#2c2c2a"/>
+<text x="60.0" y="136.7" fill="#898781" font-size="12" font-weight="400" text-anchor="end">50%</text>
+<text x="453.3" y="426.0" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">50%</text>
+<line x1="70" x2="530" y1="78.0" y2="78.0" stroke="#2c2c2a"/>
+<text x="60.0" y="82.0" fill="#898781" font-size="12" font-weight="400" text-anchor="end">60%</text>
+<text x="530.0" y="426.0" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">60%</text>
+<line x1="70.0" y1="406.0" x2="530.0" y2="78.0" stroke="#898781" stroke-width="1.5" stroke-dasharray="5 5"/>
+<text x="495.5" y="124.5" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">perfect</text>
+<text x="300.0" y="452.0" fill="#c3c2b7" font-size="13" font-weight="400" text-anchor="middle">Predicted probability</text>
+<text transform="translate(22 242.0) rotate(-90)" fill="#c3c2b7" font-size="13" text-anchor="middle">Observed rate</text>
+<path d="M83.3,388.8 L94.0,388.3 L124.1,352.0 L180.6,331.4 L260.5,287.6 L348.0,199.6 L467.7,109.9" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="83.3" cy="388.8" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"><title>Pits within 3 laps: predicted 1.7%, observed 3.1%</title></circle>
+<circle cx="94.0" cy="388.3" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"><title>Pits within 3 laps: predicted 3.1%, observed 3.2%</title></circle>
+<circle cx="124.1" cy="352.0" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"><title>Pits within 3 laps: predicted 7.1%, observed 9.9%</title></circle>
+<circle cx="180.6" cy="331.4" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"><title>Pits within 3 laps: predicted 14.4%, observed 13.7%</title></circle>
+<circle cx="260.5" cy="287.6" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"><title>Pits within 3 laps: predicted 24.9%, observed 21.6%</title></circle>
+<circle cx="348.0" cy="199.6" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"><title>Pits within 3 laps: predicted 36.3%, observed 37.8%</title></circle>
+<circle cx="467.7" cy="109.9" r="4.5" fill="#3987e5" stroke="#1a1a19" stroke-width="2"><title>Pits within 3 laps: predicted 51.9%, observed 54.2%</title></circle>
+<text x="457.7" y="113.9" fill="#f0efec" font-size="12" font-weight="600" text-anchor="end">Pits within 3 laps</text>
+<path d="M77.7,401.2 L94.6,385.3 L125.5,366.2 L171.0,339.4 L251.5,262.1" fill="none" stroke="#d95926" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="77.7" cy="401.2" r="4.5" fill="#d95926" stroke="#1a1a19" stroke-width="2"><title>Pits next lap: predicted 1.0%, observed 0.9%</title></circle>
+<circle cx="94.6" cy="385.3" r="4.5" fill="#d95926" stroke="#1a1a19" stroke-width="2"><title>Pits next lap: predicted 3.2%, observed 3.8%</title></circle>
+<circle cx="125.5" cy="366.2" r="4.5" fill="#d95926" stroke="#1a1a19" stroke-width="2"><title>Pits next lap: predicted 7.2%, observed 7.3%</title></circle>
+<circle cx="171.0" cy="339.4" r="4.5" fill="#d95926" stroke="#1a1a19" stroke-width="2"><title>Pits next lap: predicted 13.2%, observed 12.2%</title></circle>
+<circle cx="251.5" cy="262.1" r="4.5" fill="#d95926" stroke="#1a1a19" stroke-width="2"><title>Pits next lap: predicted 23.7%, observed 26.3%</title></circle>
+<text x="261.5" y="266.1" fill="#f0efec" font-size="12" font-weight="600" text-anchor="start">Pits next lap</text>
+<circle cx="86" cy="92" r="5" fill="#3987e5"/>
+<text x="98.0" y="96.0" fill="#c3c2b7" font-size="12" font-weight="400" text-anchor="start">Pits within 3 laps</text>
+<circle cx="86" cy="112" r="5" fill="#d95926"/>
+<text x="98.0" y="116.0" fill="#c3c2b7" font-size="12" font-weight="400" text-anchor="start">Pits next lap</text>
+</svg>

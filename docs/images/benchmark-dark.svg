@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="444" viewBox="0 0 860 444" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
+<rect width="860" height="444" rx="10" fill="#1a1a19"/>
+<text x="24.0" y="34.0" fill="#f0efec" font-size="18" font-weight="600" text-anchor="start">Error reduction against a simple baseline</text>
+<text x="24.0" y="56.0" fill="#c3c2b7" font-size="13" font-weight="400" text-anchor="start">2026 races, each scored by models trained only on races that ended before it</text>
+<line x1="250.0" x2="250.0" y1="72" y2="398" stroke="#2c2c2a" stroke-width="1"/>
+<text x="250.0" y="418.0" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">0%</text>
+<line x1="327.1" x2="327.1" y1="72" y2="398" stroke="#2c2c2a" stroke-width="1"/>
+<text x="327.1" y="418.0" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">10%</text>
+<line x1="404.3" x2="404.3" y1="72" y2="398" stroke="#2c2c2a" stroke-width="1"/>
+<text x="404.3" y="418.0" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">20%</text>
+<line x1="481.4" x2="481.4" y1="72" y2="398" stroke="#2c2c2a" stroke-width="1"/>
+<text x="481.4" y="418.0" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">30%</text>
+<line x1="558.6" x2="558.6" y1="72" y2="398" stroke="#2c2c2a" stroke-width="1"/>
+<text x="558.6" y="418.0" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">40%</text>
+<line x1="635.7" x2="635.7" y1="72" y2="398" stroke="#2c2c2a" stroke-width="1"/>
+<text x="635.7" y="418.0" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">50%</text>
+<line x1="712.9" x2="712.9" y1="72" y2="398" stroke="#2c2c2a" stroke-width="1"/>
+<text x="712.9" y="418.0" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">60%</text>
+<line x1="790.0" x2="790.0" y1="72" y2="398" stroke="#2c2c2a" stroke-width="1"/>
+<text x="790.0" y="418.0" fill="#898781" font-size="12" font-weight="400" text-anchor="middle">70%</text>
+<text x="236.0" y="93.0" fill="#f0efec" font-size="13" font-weight="400" text-anchor="end">Next lap time</text>
+<text x="236.0" y="108.0" fill="#898781" font-size="11" font-weight="400" text-anchor="end">MAE: 0.688 vs 1.78</text>
+<g><title>Next lap time: next_lap_gbm MAE 0.688 vs stint median 1.784 (61% lower)</title><path d="M250.0,84.0 H719.9 Q723.9,84.0 723.9,88.0 V102.0 Q723.9,106.0 719.9,106.0 H250.0 Z" fill="#3987e5"/></g>
+<text x="731.9" y="100.0" fill="#f0efec" font-size="13" font-weight="600" text-anchor="start">61%</text>
+<text x="236.0" y="133.0" fill="#f0efec" font-size="13" font-weight="400" text-anchor="end">Lap time 5 laps ahead</text>
+<text x="236.0" y="148.0" fill="#898781" font-size="11" font-weight="400" text-anchor="end">MAE: 0.872 vs 2.04</text>
+<g><title>Lap time 5 laps ahead: lap5_gbm MAE 0.872 vs stint median 2.044 (57% lower)</title><path d="M250.0,124.0 H688.3 Q692.3,124.0 692.3,128.0 V142.0 Q692.3,146.0 688.3,146.0 H250.0 Z" fill="#3987e5"/></g>
+<text x="700.3" y="140.0" fill="#f0efec" font-size="13" font-weight="600" text-anchor="start">57%</text>
+<text x="236.0" y="173.0" fill="#f0efec" font-size="13" font-weight="400" text-anchor="end">Rejoin position after a stop</text>
+<text x="236.0" y="188.0" fill="#898781" font-size="11" font-weight="400" text-anchor="end">miss rate: 0.381 vs 0.675</text>
+<g><title>Rejoin position after a stop: pitstop_rule miss rate 0.381 vs no change 0.675 (44% lower)</title><path d="M250.0,164.0 H582.0 Q586.0,164.0 586.0,168.0 V182.0 Q586.0,186.0 582.0,186.0 H250.0 Z" fill="#3987e5"/></g>
+<text x="594.0" y="180.0" fill="#f0efec" font-size="13" font-weight="600" text-anchor="start">44%</text>
+<text x="236.0" y="213.0" fill="#f0efec" font-size="13" font-weight="400" text-anchor="end">Pace on fresh tyres</text>
+<text x="236.0" y="228.0" fill="#898781" font-size="11" font-weight="400" text-anchor="end">MAE: 0.857 vs 1.04</text>
+<g><title>Pace on fresh tyres: fresh_gbm MAE 0.857 vs stint best 1.044 (18% lower)</title><path d="M250.0,204.0 H384.2 Q388.2,204.0 388.2,208.0 V222.0 Q388.2,226.0 384.2,226.0 H250.0 Z" fill="#3987e5"/></g>
+<text x="396.2" y="220.0" fill="#f0efec" font-size="13" font-weight="600" text-anchor="start">18%</text>
+<text x="236.0" y="253.0" fill="#f0efec" font-size="13" font-weight="400" text-anchor="end">Car pits within 3 laps</text>
+<text x="236.0" y="268.0" fill="#898781" font-size="11" font-weight="400" text-anchor="end">log loss: 0.283 vs 0.325</text>
+<g><title>Car pits within 3 laps: gbm_hazard log loss 0.283 vs base rate 0.325 (13% lower)</title><path d="M250.0,244.0 H345.7 Q349.7,244.0 349.7,248.0 V262.0 Q349.7,266.0 345.7,266.0 H250.0 Z" fill="#3987e5"/></g>
+<text x="357.7" y="260.0" fill="#f0efec" font-size="13" font-weight="600" text-anchor="start">13%</text>
+<text x="236.0" y="293.0" fill="#f0efec" font-size="13" font-weight="400" text-anchor="end">Car pits next lap</text>
+<text x="236.0" y="308.0" fill="#898781" font-size="11" font-weight="400" text-anchor="end">log loss: 0.126 vs 0.145</text>
+<g><title>Car pits next lap: gbm_hazard log loss 0.126 vs base rate 0.145 (13% lower)</title><path d="M250.0,284.0 H347.1 Q351.1,284.0 351.1,288.0 V302.0 Q351.1,306.0 347.1,306.0 H250.0 Z" fill="#3987e5"/></g>
+<text x="359.1" y="300.0" fill="#f0efec" font-size="13" font-weight="600" text-anchor="start">13%</text>
+<text x="236.0" y="333.0" fill="#f0efec" font-size="13" font-weight="400" text-anchor="end">Safety car within 2 laps</text>
+<text x="236.0" y="348.0" fill="#898781" font-size="11" font-weight="400" text-anchor="end">log loss: 0.244 vs 0.281</text>
+<g><title>Safety car within 2 laps: engineer log loss 0.244 vs gbm signals 0.281 (13% lower)</title><path d="M250.0,324.0 H347.6 Q351.6,324.0 351.6,328.0 V342.0 Q351.6,346.0 347.6,346.0 H250.0 Z" fill="#3987e5"/></g>
+<text x="359.6" y="340.0" fill="#f0efec" font-size="13" font-weight="600" text-anchor="start">13%</text>
+<text x="236.0" y="373.0" fill="#f0efec" font-size="13" font-weight="400" text-anchor="end">Time a stop costs</text>
+<text x="236.0" y="388.0" fill="#898781" font-size="11" font-weight="400" text-anchor="end">MAE: 4.03 vs 4.33</text>
+<g><title>Time a stop costs: v01_prior_shrink MAE 4.026 vs pitstop_loss_gbm 4.329 (7% lower)</title><path d="M250.0,364.0 H300.0 Q304.0,364.0 304.0,368.0 V382.0 Q304.0,386.0 300.0,386.0 H250.0 Z" fill="#3987e5"/></g>
+<text x="312.0" y="380.0" fill="#f0efec" font-size="13" font-weight="600" text-anchor="start">7%</text>
+<line x1="250" x2="250" y1="72" y2="398" stroke="#383835" stroke-width="1"/>
+</svg>

@@ -1,7 +1,7 @@
 # Engineering handbook
 
 How PitSense is built and the rules every change follows. Written for the
-engineers building it (people or agents) and for teams adopting it.
+engineers building it and for teams adopting it.
 
 ## The idea
 
@@ -185,36 +185,6 @@ Exceptions:
 - The voice and live owners may add their own optional-dependency extra to `pyproject.toml`.
 - Any engineer module may become a package of the same name.
 
-## Working in a git worktree
-
-The global Python (3.14) has pitsense installed in editable mode, pointing at
-the main checkout. Put your worktree first, and give yourself a private data
-folder that shares the raw race data.
-
-```powershell
-# once (PowerShell)
-$W = (git rev-parse --show-toplevel)
-New-Item -ItemType Directory -Force "$W\data" | Out-Null
-New-Item -ItemType Junction -Path "$W\data\raw" -Target "C:\Users\vedan\Downloads\aiml\pitsense\data\raw"
-```
-
-```bash
-# every Bash command (shell state doesn't persist between calls)
-export PYTHONPATH="$(git rev-parse --show-toplevel)/src" PITSENSE_DATA="$(git rev-parse --show-toplevel)/data"
-python -c "import pitsense; print(pitsense.__file__)"          # must be inside your worktree
-python -m pitsense bench build --year 2025 2026 --jobs 3        # ~30 s, into your private data folder
-python -m pitsense bench run --tasks <yours> --out "$PITSENSE_DATA/reports"
-python -m pitsense leakcheck --year 2026 --race hungary --cuts 3
-```
-
-- Never write to the main checkout's `data/` or `reports/`.
-- Only the data engineer downloads new seasons. Everyone else uses
-  `--year 2025 2026` until 2018–2024 is merged.
-- Use `--jobs 3` at most: several engineers share 16 cores.
-- Don't install or upgrade packages, except the voice engineer's PyTorch.
-  scikit-learn, pandas, numpy and pyarrow are available.
-- Only the voice engineer uses the GPU.
-
 ## Definition of done
 
 1. Your engineer fills its keys from the table above (plus anything useful),
@@ -229,27 +199,4 @@ python -m pitsense leakcheck --year 2026 --race hungary --cuts 3
 5. **Speed.** `bench build --year 2025 2026` stays under about twice its current
    time. Pit-wall-only engineers stay under 2 s per snapshot for the focus cars.
 
-**Commits.** Small and logical, and the message says why. End every message with:
-
-```
-```
-
-Don't push, and don't touch other branches.
-
-**Final report to the lead:**
-- branch and last commit;
-- what you built;
-- which keys you fill;
-- benchmark table: yours against the baseline, on 2026;
-- leakcheck results and core-leaderboard changes;
-- open issues, and anything you need from other engineers.
-
-## Working economically (agents)
-
-Token and compute use is a real cost. Every engineer works like this:
-
-- **Read narrowly.** grep/rg for the lines you need, then read small ranges; never dump whole large files or re-read what you already read.
-- **Print little.** Pipe through `| tail -n 20` or a grep; scripts write results to `data/scratch/*.json` and print one-line summaries.
-- **Run expensive jobs once.** Cache replays, traces and simulator results in `data/scratch`; tune by re-scoring cached results; score the test year once at the end.
-- **No sub-agents.** Plan briefly, then act.
-- **Short reports.** At most about 40 lines, with tables only for the key numbers.
+**Commits.** Small and logical, and the message says why.

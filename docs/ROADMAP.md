@@ -1,6 +1,6 @@
 # Roadmap: from replay-good to race-day-real
 
-> **Sequenced plan (2026-10-21):** the open items below are now work packages with acceptance tests, agents and a
+> **Sequenced plan (2026-10-21):** the open items below are now work packages with acceptance tests and a
 > paper outline in [RESEARCH_PLAN.md](RESEARCH_PLAN.md). This file stays as the gap list; that file says what to do next.
 
 What stands between PitSense and a tool a real F1 strategy team would trust, ordered by impact.

@@ -17,9 +17,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: pip install -e "./pitsense[dev]"
+        run: pip install -e ".[dev]"
       - name: Lint with ruff
-        run: ruff check pitsense/src pitsense/tests
+        run: ruff check src tests
       - name: Run tests
-        working-directory: pitsense
         run: pytest -q

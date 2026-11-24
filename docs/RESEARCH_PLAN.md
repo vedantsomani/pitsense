@@ -7,8 +7,7 @@ Written 2026-10-21. This is the working plan for two goals that share one codeba
    telemetry, evaluated leak-free on held-out races and judged on decision value, not lap-time error.
 
 It replaces the "Open" items of [ROADMAP.md](ROADMAP.md) with a sequenced programme. Each work package (WP) has
-a goal, the files it touches, the acceptance test, and the agent it is sized for (`pit-architect` for hard
-reasoning and measurement, `pit-engineer` for specified features, `pit-mechanic` for chores). Nothing in a WP is
+a goal, the files it touches, the acceptance test, and a time estimate. Nothing in a WP is
 done until its acceptance test passes on the benchmark with as-of training (`docs/evaluation.md`).
 
 Rules that apply to every WP:
@@ -23,7 +22,7 @@ Rules that apply to every WP:
 
 ---
 
-## 0. Housekeeping first (pit-mechanic, half a day)
+## 0. Housekeeping first (half a day)
 
 The working tree has 28 modified and 8 new files uncommitted from the October work, plus a stray
 `tests/_rev_tmp_test.py`.
@@ -37,7 +36,7 @@ Acceptance: clean `git status`, README results block non-empty, tag exists.
 
 ---
 
-## 1. Telemetry physics features (pit-architect, 3-4 days) — the paper's first experiment
+## 1. Telemetry physics features (3-4 days) — the paper's first experiment
 
 **Gap.** Lap time in the simulator (`strategy/sim.py: lap_times_for`) is `pace + (deg - fuel) * age + cliff`.
 The degradation slope comes from a GBM on timing-feed features only. The CarData stream (speed, throttle,
@@ -74,7 +73,7 @@ models), `bench/hazard.py` (if the physics residual needs a hook), `docs/enginee
 
 ---
 
-## 2. Cliff as a wear-driven hazard (pit-architect, 2-3 days)
+## 2. Cliff as a wear-driven hazard (2-3 days)
 
 **Gap.** The cliff is drawn empirically from an age distribution (`sim.py: cliff_ages`). This is where the
 "calls 2-7 laps early" failure lives: an age-based cliff fires on schedule whether or not the tyre is actually
@@ -92,7 +91,7 @@ Acceptance: median call timing error on 2026 moves toward zero without decision 
 
 ---
 
-## 3. Rivals that react (pit-architect, 4-5 days)
+## 3. Rivals that react (4-5 days)
 
 **Gap.** Opponent stop laps are shared across all candidate plans (`sim.py: sample_schedules`), so an undercut is
 never covered and an overcut is never answered. The earlier `rival_cover` attempt was a fixed cover rate and did
@@ -107,7 +106,7 @@ Acceptance: decision value on 2026 up versus WP2; p95 call latency under 1 s on 
 
 ---
 
-## 4. Per-team pit-crew and fuel priors (pit-engineer, 1-2 days)
+## 4. Per-team pit-crew and fuel priors (1-2 days)
 
 - Stationary-time prior per team from history (`pitloss.py`, `bench/pitstop.py`), as-of.
 - Fuel correction per car from `fuel_proxy` (WP1) instead of one constant per circuit.
@@ -116,7 +115,7 @@ Acceptance: `position_after_stop` task log-loss improves; no leak-check regressi
 
 ---
 
-## 5. Learning from the operator (pit-engineer, 2 days)
+## 5. Learning from the operator (2 days)
 
 Rejections from `/api/ack` are graded but never used. Add a per-circuit, per-action bias on the call threshold
 in the head, fitted from accept/reject history, shrunk toward zero with few samples. Report on shadow-score how
@@ -124,7 +123,7 @@ many later calls it would have changed.
 
 ---
 
-## 6. Race-day operations (pit-engineer, 3 days)
+## 6. Race-day operations (3 days)
 
 - Second live source: FastF1's own live client as a hot standby behind `pitwall/sources.py`, switched by the
   health watchdog on 30 s of silence.
@@ -134,7 +133,7 @@ many later calls it would have changed.
 
 ---
 
-## 7. Voice: fine-tuning a ~30B model (pit-architect to design, pit-engineer to run)
+## 7. Voice: fine-tuning a ~30B model
 
 **Why.** The scratch 26M model and SmolLM2-360M write radio lines that pass the guard most of the time, but the
 free-form answers ("why not the hard?", "what does the rival's radio mean for us?") are where a strategist
@@ -208,17 +207,15 @@ WP7 is a separate short paper or an appendix.
 
 ---
 
-## Timeline and agents
+## Timeline
 
-| Week | WP | Agent | Deliverable |
-|---|---|---|---|
-| 1 | 0, 1 | mechanic, architect | baseline tag; telemetry features; experiment A table |
-| 2 | 2 | architect | wear hazard; experiment B table |
-| 3 | 3 | architect | reacting rivals; latency numbers |
-| 4 | 4, 5 | engineer | pit-crew and fuel priors; operator learning |
-| 5 | 6 | engineer | failover, latency budget, role views |
-| 6 | 7 | architect, engineer | corpus v2; 8B, 30B and 70B runs on the H200 node; vLLM endpoint |
-| 7-8 | 8 | — | paper draft from generated tables |
+| Week | WP | Deliverable |
+|---|---|---|
+| 1 | 0, 1 | baseline tag; telemetry features; experiment A table |
+| 2 | 2 | wear hazard; experiment B table |
+| 3 | 3 | reacting rivals; latency numbers |
+| 4 | 4, 5 | pit-crew and fuel priors; operator learning |
+| 5 | 6 | failover, latency budget, role views |
+| 6 | 7 | corpus v2; 8B, 30B and 70B runs on the H200 node; vLLM endpoint |
+| 7-8 | 8 | paper draft from generated tables |
 
-Token discipline: one agent per WP, with the WP section above as its brief, and the acceptance test as its
-definition of done. Do not spawn for anything below a WP.
